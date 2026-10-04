@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0f1215">
+  <meta name="color-scheme" content="dark">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Gym Log">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>Gym Log</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main>
+    <!-- 記録 -->
+    <section id="view-record" class="view active" aria-label="記録">
+      <div id="record-empty" class="empty" hidden>
+        <p>まだマシンが登録されていません。</p>
+        <button class="btn primary" data-goto="admin">マシンを登録する</button>
+      </div>
+
+      <div id="record-body">
+        <h2>マシン</h2>
+        <div id="machine-chips" class="chips" role="radiogroup" aria-label="マシンを選択"></div>
+
+        <div id="last-session" class="card last"></div>
+
+        <div class="card inputs">
+          <div class="field">
+            <label for="weight">重量 (kg)</label>
+            <div class="stepper">
+              <button type="button" class="step" data-target="weight" data-dir="-1" aria-label="重量を減らす">−</button>
+              <input id="weight" type="number" inputmode="decimal" min="0" step="any" value="20">
+              <button type="button" class="step" data-target="weight" data-dir="1" aria-label="重量を増やす">＋</button>
+            </div>
+          </div>
+          <div class="field">
+            <label for="reps">回数</label>
+            <div class="stepper">
+              <button type="button" class="step" data-target="reps" data-dir="-1" aria-label="回数を減らす">−</button>
+              <input id="reps" type="number" inputmode="numeric" min="1" step="1" value="10">
+              <button type="button" class="step" data-target="reps" data-dir="1" aria-label="回数を増やす">＋</button>
+            </div>
+          </div>
+          <button id="add-set" type="button" class="btn primary big">セットを記録</button>
+        </div>
+
+        <h2>今日のセット</h2>
+        <div id="today-sets" class="card list"></div>
+      </div>
+    </section>
+
+    <!-- 履歴 -->
+    <section id="view-history" class="view" aria-label="履歴">
+      <div id="history-list"></div>
+    </section>
+
+    <!-- 管理 -->
+    <section id="view-admin" class="view" aria-label="管理">
+      <h2>マシンの登録</h2>
+      <form id="machine-form" class="card row-form">
+        <input id="machine-name" type="text" maxlength="40" placeholder="例: レッグプレス" autocomplete="off" aria-label="マシン名">
+        <button class="btn primary" type="submit">追加</button>
+      </form>
+      <div id="machine-list" class="card list"></div>
+
+      <h2>設定</h2>
+      <div class="card settings">
+        <label class="switch-row">
+          <span>記録したらインターバルを自動で開始</span>
+          <input id="opt-auto" type="checkbox">
+        </label>
+        <label class="switch-row">
+          <span>重量の刻み (＋/− ボタン)</span>
+          <select id="opt-step">
+            <option value="1">1 kg</option>
+            <option value="2.5">2.5 kg</option>
+            <option value="5">5 kg</option>
+            <option value="10">10 kg</option>
+          </select>
+        </label>
+      </div>
+
+      <h2>バックアップ</h2>
+      <div class="card backup">
+        <p class="muted">記録はこの端末のブラウザ内にだけ保存されます。機種変更やブラウザのデータ削除に備えて、ときどき書き出してください。</p>
+        <div class="btn-row">
+          <button id="copy-btn" type="button" class="btn">Claude用にコピー</button>
+        </div>
+        <div class="btn-row" style="margin-top:10px">
+          <button id="export-btn" type="button" class="btn">書き出し</button>
+          <button id="import-btn" type="button" class="btn">読み込み</button>
+          <input id="import-file" type="file" accept="application/json,.json" hidden>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- インターバルタイマー -->
+  <div id="timer" class="timer idle" role="timer" aria-live="off">
+    <div class="timer-main">
+      <div class="timer-label" id="timer-label">インターバル</div>
+      <div class="timer-time" id="timer-time">1:30</div>
+    </div>
+    <div class="timer-side">
+      <div class="presets" id="presets" role="radiogroup" aria-label="インターバル秒数"></div>
+      <div class="timer-btns">
+        <button id="timer-add" type="button" class="btn small" hidden>+30秒</button>
+        <button id="timer-toggle" type="button" class="btn primary small">スタート</button>
+      </div>
+    </div>
+  </div>
+
+  <nav class="tabs" aria-label="メニュー">
+    <button class="tab active" data-tab="record" type="button">記録</button>
+    <button class="tab" data-tab="history" type="button">履歴</button>
+    <button class="tab" data-tab="admin" type="button">管理</button>
+  </nav>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <script src="app.js"></script>
+</body>
+</html>
