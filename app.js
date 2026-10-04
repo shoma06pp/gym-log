@@ -4,6 +4,7 @@
   const STORE_KEY = 'gymlog.v1';
   const TIMER_KEY = 'gymlog.timerEnd';
   const PRESETS = [60, 90, 120, 180];
+  const APP_VERSION = 'v8'; // sw.js の CACHE の番号と揃える
   const PARTS = ['胸', '背中', '肩', '腕', '脚', '腹', 'その他'];
   const NO_PART = '未分類';
 
@@ -285,7 +286,34 @@
     $('#opt-auto').checked = !!state.settings.autoStart;
     $('#opt-step').value = String(state.settings.step);
     renderCloud();
+    renderDiag();
   }
+
+  // 表示のずれを調べるための情報。画面のスクリーンショットを送ってもらう用
+  function renderDiag() {
+    const probe = h('div', { style: 'position:fixed;visibility:hidden;left:0;top:0;padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom) 0' });
+    document.body.append(probe);
+    const cs = getComputedStyle(probe);
+    const inset = `上 ${cs.paddingTop} / 下 ${cs.paddingBottom}`;
+    probe.remove();
+    const px = (n) => Math.round(n * 10) / 10;
+    const rect = (sel) => { const r = $(sel).getBoundingClientRect(); return `上${px(r.top)} 下${px(r.bottom)}`; };
+    const vv = window.visualViewport;
+    const lines = [
+      `版: ${APP_VERSION}`,
+      `ホーム画面起動: ${navigator.standalone === true || matchMedia('(display-mode: standalone)').matches ? 'はい' : 'いいえ'}`,
+      `window: ${innerWidth} x ${innerHeight}`,
+      `visualViewport: ${vv ? `${px(vv.width)} x ${px(vv.height)} (上${px(vv.offsetTop)})` : '-'}`,
+      `screen: ${screen.width} x ${screen.height}`,
+      `安全領域: ${inset}`,
+      `body: ${rect('body')}`,
+      `main: ${rect('main')}`,
+      `タイマー: ${rect('#timer')}`,
+      `タブ: ${rect('.tabs')}`,
+    ];
+    $('#diag').textContent = lines.join('\n');
+  }
+  window.addEventListener('resize', () => { if ($('#view-admin').classList.contains('active')) renderDiag(); });
 
   const partOptions = (selected) => [
     h('option', { value: '', selected: !selected }, NO_PART),

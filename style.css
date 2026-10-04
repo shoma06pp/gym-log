@@ -144,6 +144,8 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
 .sync-state { font-size: 13px; color: var(--done); }
 .sync-state.wait { color: var(--muted); }
 
+.diag { margin: 0; font: 12px/1.6 ui-monospace, Menlo, Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--muted); }
+
 /* 履歴 */
 .day { margin-top: 18px; }
 .day h3 { font-size: 15px; margin: 0 0 8px; }
