@@ -4,7 +4,7 @@
   const STORE_KEY = 'gymlog.v1';
   const TIMER_KEY = 'gymlog.timerEnd';
   const PRESETS = [60, 90, 120, 180];
-  const APP_VERSION = 'v14'; // sw.js の CACHE の番号と揃える
+  const APP_VERSION = 'v15'; // sw.js の CACHE の番号と揃える
   const VOLUMES = { mid: 0.5, high: 0.85, max: 1 }; // 休憩終了の音量
   const PARTS = ['胸', '背中', '肩', '腕', '脚', '腹', 'その他'];
   const NO_PART = '未分類';
@@ -35,7 +35,8 @@
     lastPart: 'all', // 記録画面で選んでいる部位 ('all' = すべて)
     lastMode: 'strength', // 記録画面で選んでいる種類 ('strength' = 筋トレ / 'cardio' = 有酸素)
     owner: null, // クラウドと同期した Firebase ユーザーID
-    settings: { interval: 90, autoStart: true, step: 2.5, volume: 'high' },
+    // sound: 'default' = 標準の音 / 'custom' = 自分で選んだ音声ファイル(端末内に保存、同期しない)
+    settings: { interval: 90, autoStart: true, step: 2.5, volume: 'high', sound: 'default', soundName: '' },
   });
 
   function load() {
@@ -379,6 +380,7 @@
     $('#opt-auto').checked = !!state.settings.autoStart;
     $('#opt-step').value = String(state.settings.step);
     $('#opt-volume').value = state.settings.volume in VOLUMES ? state.settings.volume : 'high';
+    renderSoundName();
     renderCloud();
     renderDiag();
   }
@@ -496,6 +498,37 @@
   $('#opt-step').addEventListener('change', (e) => { state.settings.step = Number(e.target.value); save(); });
   $('#opt-volume').addEventListener('change', (e) => { state.settings.volume = e.target.value; save(); });
   $('#test-sound').addEventListener('click', () => { ensureAudio(); rebuildAudioIfStuck(); beep(); });
+
+  $('#sound-pick').addEventListener('click', () => $('#sound-file').click());
+  $('#sound-file').addEventListener('change', async (e) => {
+    const file = e.target.files[0];
+    e.target.value = '';
+    if (!file) return;
+    if (file.size > 10 * 1024 * 1024) return toast('ファイルが大きすぎます(10MBまで)');
+    try {
+      const data = await file.arrayBuffer();
+      const buffer = await decodeAudio(data); // 先に再生できるか確かめる
+      await idb.set('custom', { name: file.name, data });
+      customBuffer = buffer;
+      state.settings.sound = 'custom';
+      state.settings.soundName = file.name;
+      save();
+      renderSoundName();
+      toast('休憩終了の音を設定しました');
+      beep();
+    } catch (err) {
+      toast('この音声ファイルは使えません(wav / mp3 / m4a を選んでください)');
+    }
+  });
+  $('#sound-reset').addEventListener('click', async () => {
+    try { await idb.del('custom'); } catch (e) { /* 無視 */ }
+    customBuffer = null;
+    state.settings.sound = 'default';
+    state.settings.soundName = '';
+    save();
+    renderSoundName();
+    toast('標準の音に戻しました');
+  });
 
   /* ---------- バックアップ / Claudeへの共有 ---------- */
   function buildSummaryText() {
@@ -624,7 +657,71 @@
     }, 300);
   }
 
-  // 休憩終了の音: 高めの音を矩形波で、4回+4回のピピピピッ。コンプレッサーで音割れを抑えつつ音量を稼ぐ
+  /* 自分の音声ファイル: この端末の IndexedDB にだけ保存する(サーバーや公開サイトには置かない) */
+  const idb = {
+    open() {
+      return new Promise((resolve, reject) => {
+        const r = indexedDB.open('gymlog-sound', 1);
+        r.onupgradeneeded = () => r.result.createObjectStore('kv');
+        r.onsuccess = () => resolve(r.result);
+        r.onerror = () => reject(r.error);
+      });
+    },
+    async get(key) {
+      const db = await this.open();
+      return new Promise((resolve, reject) => {
+        const q = db.transaction('kv').objectStore('kv').get(key);
+        q.onsuccess = () => resolve(q.result);
+        q.onerror = () => reject(q.error);
+      });
+    },
+    async set(key, value) {
+      const db = await this.open();
+      return new Promise((resolve, reject) => {
+        const t = db.transaction('kv', 'readwrite');
+        t.objectStore('kv').put(value, key);
+        t.oncomplete = () => resolve();
+        t.onerror = () => reject(t.error);
+      });
+    },
+    async del(key) {
+      const db = await this.open();
+      return new Promise((resolve, reject) => {
+        const t = db.transaction('kv', 'readwrite');
+        t.objectStore('kv').delete(key);
+        t.oncomplete = () => resolve();
+        t.onerror = () => reject(t.error);
+      });
+    },
+  };
+  let customBuffer = null; // デコード済みの音声(AudioBuffer)
+
+  function decodeAudio(arrayBuffer) {
+    ensureAudio();
+    if (!T.ctx) return Promise.reject(new Error('no audio'));
+    // Safari はコールバック形式のほうが確実。元のデータは壊れないよう複製して渡す
+    return new Promise((resolve, reject) => T.ctx.decodeAudioData(arrayBuffer.slice(0), resolve, reject));
+  }
+
+  function renderSoundName() {
+    $('#sound-name').textContent = state.settings.sound === 'custom' && state.settings.soundName ? state.settings.soundName : '標準の音';
+  }
+
+  async function loadCustomSound() {
+    try {
+      if (state.settings.sound === 'custom') {
+        const rec = await idb.get('custom');
+        customBuffer = rec ? await decodeAudio(rec.data) : null;
+        if (!rec) { state.settings.sound = 'default'; state.settings.soundName = ''; save(); }
+      }
+    } catch (e) {
+      customBuffer = null; // 読めなければ標準の音で鳴らす
+    }
+    renderSoundName();
+  }
+
+  // 休憩終了の音。自分の音声ファイルがあればそれ、なければ高めの矩形波のピピピピッ。
+  // コンプレッサーで音割れを抑えつつ音量を稼ぐ
   function beep() {
     if (navigator.vibrate) navigator.vibrate([250, 120, 250, 120, 500]);
     ensureAudio();
@@ -635,6 +732,15 @@
     master.gain.value = vol;
     const comp = ctx.createDynamicsCompressor();
     master.connect(comp).connect(ctx.destination);
+
+    if (state.settings.sound === 'custom' && customBuffer) {
+      const src = ctx.createBufferSource();
+      src.buffer = customBuffer;
+      master.gain.value = vol * 2; // 録音された音は小さめのことが多いので持ち上げる
+      src.connect(master);
+      src.start();
+      return;
+    }
     const t0 = ctx.currentTime + 0.05;
     [0, 0.25, 0.5, 0.75, 1.3, 1.55, 1.8, 2.05].forEach((off, i) => {
       const osc = ctx.createOscillator();
@@ -832,6 +938,7 @@
   if (T.endAt) { requestWake(); ensureTick(); }
   tick();
   renderRecord();
+  loadCustomSound();
 
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {

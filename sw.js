@@ -1,6 +1,6 @@
 // アプリ本体をキャッシュして、電波の弱いジムでも開けるようにする。
 // ファイルを更新したら CACHE の番号を上げること(古いキャッシュが破棄される)。
-const CACHE = 'gymlog-v14';
+const CACHE = 'gymlog-v15';
 const ASSETS = [
   './',
   'index.html',

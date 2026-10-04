@@ -147,6 +147,9 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
 .group-head:first-child { padding-top: 8px; }
 
 .settings { display: grid; gap: 12px; }
+.sound-pick { display: grid; gap: 8px; }
+.sound-pick .muted { margin: 0; font-size: 12px; }
+.switch-row strong { font-size: 14px; text-align: right; overflow-wrap: anywhere; }
 .switch-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 44px; }
 .switch-row input[type="checkbox"] { width: 24px; height: 24px; accent-color: var(--accent); }
 .switch-row select {
