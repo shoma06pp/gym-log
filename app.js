@@ -4,7 +4,7 @@
   const STORE_KEY = 'gymlog.v1';
   const TIMER_KEY = 'gymlog.timerEnd';
   const PRESETS = [60, 90, 120, 180];
-  const APP_VERSION = 'v15'; // sw.js の CACHE の番号と揃える
+  const APP_VERSION = 'v16'; // sw.js の CACHE の番号と揃える
   const VOLUMES = { mid: 0.5, high: 0.85, max: 1 }; // 休憩終了の音量
   const PARTS = ['胸', '背中', '肩', '腕', '脚', '腹', 'その他'];
   const NO_PART = '未分類';
@@ -35,8 +35,8 @@
     lastPart: 'all', // 記録画面で選んでいる部位 ('all' = すべて)
     lastMode: 'strength', // 記録画面で選んでいる種類 ('strength' = 筋トレ / 'cardio' = 有酸素)
     owner: null, // クラウドと同期した Firebase ユーザーID
-    // sound: 'default' = 標準の音 / 'custom' = 自分で選んだ音声ファイル(端末内に保存、同期しない)
-    settings: { interval: 90, autoStart: true, step: 2.5, volume: 'high', sound: 'default', soundName: '' },
+    // sound: 内蔵の音の名前(beep / chime / bell / arp / siren / coin) または 'custom' = 自分で選んだ音声ファイル(端末内に保存、同期しない)
+    settings: { interval: 90, autoStart: true, step: 2.5, volume: 'high', sound: 'beep', soundName: '' },
   });
 
   function load() {
@@ -45,6 +45,7 @@
       if (s && Array.isArray(s.machines) && Array.isArray(s.sets)) {
         const d = defaults();
         const st = { ...d, ...s, settings: { ...d.settings, ...s.settings } };
+        if (st.settings.sound === 'default') st.settings.sound = 'beep'; // 旧バージョンの設定値
         st.machines.forEach((m, i) => {
           if (!Number.isFinite(m.createdAt)) m.createdAt = i;
           m.kind = m.kind === 'cardio' ? 'cardio' : 'strength';
@@ -499,6 +500,15 @@
   $('#opt-volume').addEventListener('change', (e) => { state.settings.volume = e.target.value; save(); });
   $('#test-sound').addEventListener('click', () => { ensureAudio(); rebuildAudioIfStuck(); beep(); });
 
+  // 音を選んだら、すぐに鳴らして確かめられるようにする
+  $('#sound-kind').addEventListener('change', (e) => {
+    state.settings.sound = e.target.value;
+    save();
+    ensureAudio();
+    rebuildAudioIfStuck();
+    beep();
+  });
+
   $('#sound-pick').addEventListener('click', () => $('#sound-file').click());
   $('#sound-file').addEventListener('change', async (e) => {
     const file = e.target.files[0];
@@ -523,11 +533,11 @@
   $('#sound-reset').addEventListener('click', async () => {
     try { await idb.del('custom'); } catch (e) { /* 無視 */ }
     customBuffer = null;
-    state.settings.sound = 'default';
+    state.settings.sound = 'beep';
     state.settings.soundName = '';
     save();
     renderSoundName();
-    toast('標準の音に戻しました');
+    toast('保存した音声を削除しました');
   });
 
   /* ---------- バックアップ / Claudeへの共有 ---------- */
@@ -703,16 +713,26 @@
     return new Promise((resolve, reject) => T.ctx.decodeAudioData(arrayBuffer.slice(0), resolve, reject));
   }
 
+  // 音の選択欄を、いまの設定に合わせて作り直す。「自分の音声」は、保存してあるときだけ出す
   function renderSoundName() {
-    $('#sound-name').textContent = state.settings.sound === 'custom' && state.settings.soundName ? state.settings.soundName : '標準の音';
+    const sel = $('#sound-kind');
+    const hasCustom = !!state.settings.soundName && !!customBuffer;
+    sel.replaceChildren(
+      ...Object.entries(SOUNDS).map(([key, s]) => h('option', { value: key }, s.label)),
+      hasCustom ? h('option', { value: 'custom' }, `自分の音声: ${state.settings.soundName}`) : null);
+    sel.value = state.settings.sound in SOUNDS || hasCustom ? state.settings.sound : 'beep';
   }
 
   async function loadCustomSound() {
     try {
-      if (state.settings.sound === 'custom') {
+      if (state.settings.soundName) {
         const rec = await idb.get('custom');
         customBuffer = rec ? await decodeAudio(rec.data) : null;
-        if (!rec) { state.settings.sound = 'default'; state.settings.soundName = ''; save(); }
+        if (!rec) {
+          state.settings.soundName = '';
+          if (state.settings.sound === 'custom') state.settings.sound = 'beep';
+          save();
+        }
       }
     } catch (e) {
       customBuffer = null; // 読めなければ標準の音で鳴らす
@@ -720,7 +740,69 @@
     renderSoundName();
   }
 
-  // 休憩終了の音。自分の音声ファイルがあればそれ、なければ高めの矩形波のピピピピッ。
+  /* 内蔵の音(アプリ内で合成するオリジナルの音)。それぞれ (ctx, out, t0) で、t0 秒後から out へ鳴らす */
+  const tone = (ctx, out, { f, t, d, type = 'sine', g = 1, a = 0.01 }) => {
+    const osc = ctx.createOscillator();
+    const env = ctx.createGain();
+    osc.type = type;
+    osc.frequency.value = f;
+    env.gain.setValueAtTime(0.0001, t);
+    env.gain.exponentialRampToValueAtTime(g, t + a);
+    env.gain.exponentialRampToValueAtTime(0.0001, t + d);
+    osc.connect(env).connect(out);
+    osc.start(t);
+    osc.stop(t + d + 0.02);
+  };
+
+  const SOUNDS = {
+    // 高めの矩形波の「ピピピピッ」。いちばん目立つ
+    beep: {
+      label: 'ピピピピッ(標準)',
+      play: (ctx, out, t0) => [0, 0.25, 0.5, 0.75, 1.3, 1.55, 1.8, 2.05].forEach((off, i) =>
+        tone(ctx, out, { f: i % 4 === 3 ? 2093 : 1568, t: t0 + off, d: 0.19, type: 'square' })),
+    },
+    // ドアチャイムの「ピンポーン」
+    chime: {
+      label: 'ピンポーン',
+      play: (ctx, out, t0) => {
+        [[1319, 0, 0.7], [1047, 0.5, 1.4], [1319, 1.9, 0.7], [1047, 2.4, 1.4]].forEach(([f, off, d]) => {
+          tone(ctx, out, { f, t: t0 + off, d, g: 1 });
+          tone(ctx, out, { f: f * 2, t: t0 + off, d: d * 0.6, g: 0.35 });
+        });
+      },
+    },
+    // 金属的なベルの「カーン」。倍音を重ねる
+    bell: {
+      label: 'ベル(カーン)',
+      play: (ctx, out, t0) => [0, 1.1, 2.2].forEach((off) =>
+        [[1, 1], [2.76, 0.6], [5.4, 0.35], [8.93, 0.2]].forEach(([mul, g]) =>
+          tone(ctx, out, { f: 880 * mul, t: t0 + off, d: 1.6 / Math.sqrt(mul), g, a: 0.003 }))),
+    },
+    // ドミソド〜と駆け上がるアルペジオ
+    arp: {
+      label: 'ファンファーレ',
+      play: (ctx, out, t0) => {
+        [523, 659, 784, 1047, 1319].forEach((f, i) => tone(ctx, out, { f, t: t0 + i * 0.12, d: i === 4 ? 1.2 : 0.3, type: 'triangle' }));
+        [523, 659, 784, 1047, 1319].forEach((f, i) => tone(ctx, out, { f, t: t0 + 1.8 + i * 0.12, d: i === 4 ? 1.2 : 0.3, type: 'triangle' }));
+      },
+    },
+    // 2つの音を交互に鳴らす警報
+    siren: {
+      label: 'サイレン',
+      play: (ctx, out, t0) => [0, 0.35, 0.7, 1.05, 1.4, 1.75, 2.1, 2.45].forEach((off, i) =>
+        tone(ctx, out, { f: i % 2 ? 660 : 880, t: t0 + off, d: 0.33, type: 'sawtooth', g: 0.7 })),
+    },
+    // コインを取ったような「ピロリン」
+    coin: {
+      label: 'ピロリン',
+      play: (ctx, out, t0) => [0, 0.9, 1.8].forEach((off) => {
+        tone(ctx, out, { f: 988, t: t0 + off, d: 0.1, type: 'square' });
+        tone(ctx, out, { f: 1319, t: t0 + off + 0.1, d: 0.6, type: 'square' });
+      }),
+    },
+  };
+
+  // 休憩終了の音。選んだ音(内蔵 or 自分の音声ファイル)を鳴らす。
   // コンプレッサーで音割れを抑えつつ音量を稼ぐ
   function beep() {
     if (navigator.vibrate) navigator.vibrate([250, 120, 250, 120, 500]);
@@ -741,20 +823,7 @@
       src.start();
       return;
     }
-    const t0 = ctx.currentTime + 0.05;
-    [0, 0.25, 0.5, 0.75, 1.3, 1.55, 1.8, 2.05].forEach((off, i) => {
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.type = 'square';
-      osc.frequency.value = i % 4 === 3 ? 2093 : 1568;
-      gain.gain.setValueAtTime(0.0001, t0 + off);
-      gain.gain.exponentialRampToValueAtTime(1, t0 + off + 0.01);
-      gain.gain.setValueAtTime(1, t0 + off + 0.14);
-      gain.gain.exponentialRampToValueAtTime(0.0001, t0 + off + 0.19);
-      osc.connect(gain).connect(master);
-      osc.start(t0 + off);
-      osc.stop(t0 + off + 0.2);
-    });
+    (SOUNDS[state.settings.sound] || SOUNDS.beep).play(ctx, master, ctx.currentTime + 0.05);
   }
 
   async function requestWake() {

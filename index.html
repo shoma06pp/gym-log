@@ -140,10 +140,13 @@
           </select>
         </label>
         <div class="sound-pick">
-          <div class="switch-row"><span>休憩終了の音</span><strong id="sound-name">標準の音</strong></div>
+          <label class="switch-row">
+            <span>休憩終了の音</span>
+            <select id="sound-kind"></select>
+          </label>
           <div class="btn-row">
-            <button id="sound-pick" type="button" class="btn">音声ファイルを選ぶ</button>
-            <button id="sound-reset" type="button" class="btn">標準に戻す</button>
+            <button id="sound-pick" type="button" class="btn">自分の音声ファイルを選ぶ</button>
+            <button id="sound-reset" type="button" class="btn">保存した音声を削除</button>
           </div>
           <p class="muted">選んだ音声は、この端末の中だけに保存されます(サーバーには送られません)。</p>
           <input id="sound-file" type="file" accept="audio/*,.wav,.mp3,.m4a,.aac" hidden>
