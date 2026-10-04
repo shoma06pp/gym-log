@@ -102,7 +102,7 @@
     if (name === 'history') renderHistory();
     if (name === 'admin') renderAdmin();
     if (name === 'record') renderRecord();
-    window.scrollTo(0, 0);
+    $('main').scrollTo(0, 0);
   }
   document.querySelectorAll('.tab').forEach((t) => t.addEventListener('click', () => showTab(t.dataset.tab)));
   document.querySelectorAll('[data-goto]').forEach((b) => b.addEventListener('click', () => showTab(b.dataset.goto)));
