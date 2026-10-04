@@ -4,7 +4,7 @@
   const STORE_KEY = 'gymlog.v1';
   const TIMER_KEY = 'gymlog.timerEnd';
   const PRESETS = [60, 90, 120, 180];
-  const APP_VERSION = 'v17'; // sw.js の CACHE の番号と揃える
+  const APP_VERSION = 'v18'; // sw.js の CACHE の番号と揃える
   const VOLUMES = { mid: 0.5, high: 0.85, max: 1 }; // 休憩終了の音量
   const PARTS = ['胸', '背中', '肩', '腕', '脚', '腹', 'その他'];
   const NO_PART = '未分類';
@@ -116,12 +116,12 @@
 
   /* ---------- トースト ---------- */
   let toastTimer = 0;
-  function toast(msg) {
+  function toast(msg, ms = 2200) {
     const el = $('#toast');
     el.textContent = msg;
     el.classList.add('show');
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => el.classList.remove('show'), 2200);
+    toastTimer = setTimeout(() => el.classList.remove('show'), ms);
   }
 
   /* ---------- タブ ---------- */
@@ -381,7 +381,10 @@
     } catch (e) {
       console.warn(e);
       const msg = String(e && (e.code || e.message));
-      toast(/popup|cancel/.test(msg) ? 'ドライブへの保存を中止しました' : `ドライブに保存できませんでした: ${msg.slice(0, 60)}`);
+      if (/popup|cancel/.test(msg)) toast('ドライブへの保存を中止しました');
+      else if (e.driveReason === 'accessNotConfigured' || e.driveReason === 'SERVICE_DISABLED') toast('Google Drive API が有効になっていません(Google Cloud で有効化してください)', 6000);
+      else if (e.driveReason === 'insufficientPermissions' || e.driveReason === 'PERMISSION_DENIED') toast('ドライブへのアクセス許可がありません。もう一度押して、ドライブの項目にチェックを入れてください', 6000);
+      else toast(`ドライブに保存できませんでした: ${msg.slice(0, 120)}`, 6000);
     } finally {
       btn.disabled = false;
     }

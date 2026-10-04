@@ -184,7 +184,15 @@
       const call = async (url, init = {}) => {
         const r = await fetch(url, { ...init, headers: { Authorization: `Bearer ${token}`, ...(init.headers || {}) } });
         if (r.status === 401) driveTokenCache = null;
-        if (!r.ok) throw new Error(`drive ${r.status}: ${(await r.text()).slice(0, 200)}`);
+        if (!r.ok) {
+          const text = await r.text();
+          let reason = '';
+          try { const j = JSON.parse(text).error; reason = (j.errors && j.errors[0] && j.errors[0].reason) || j.status || ''; } catch (e) { /* 本文が JSON でない */ }
+          const err = new Error(`drive ${r.status} ${reason}: ${text.slice(0, 300)}`);
+          err.driveStatus = r.status;
+          err.driveReason = reason;
+          throw err;
+        }
         return r.json();
       };
       const find = async (q) => (await call(`${api}?fields=files(id)&spaces=drive&q=${encodeURIComponent(q)}`)).files[0];
