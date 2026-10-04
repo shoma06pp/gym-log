@@ -28,6 +28,7 @@
     machines: [],
     sets: [],
     lastMachine: null,
+    owner: null, // クラウドと同期した Firebase ユーザーID
     settings: { interval: 90, autoStart: true, step: 2.5 },
   });
 
@@ -36,13 +37,22 @@
       const s = JSON.parse(localStorage.getItem(STORE_KEY));
       if (s && Array.isArray(s.machines) && Array.isArray(s.sets)) {
         const d = defaults();
-        return { ...d, ...s, settings: { ...d.settings, ...s.settings } };
+        const st = { ...d, ...s, settings: { ...d.settings, ...s.settings } };
+        st.machines.forEach((m, i) => { if (!Number.isFinite(m.createdAt)) m.createdAt = i; });
+        return st;
       }
     } catch (e) { /* 壊れていたら初期化 */ }
     return defaults();
   }
 
   let state = load();
+
+  // cloud.js が読み込めなかった場合でも、ローカル保存だけで動くようにする
+  const noop = () => {};
+  const Cloud = window.GymCloud || {
+    init: noop, signIn: noop, signOut: noop, signedIn: false,
+    upsertMachine: noop, upsertSet: noop, removeSet: noop, removeMachineAndSets: noop, bulkUpsert: noop,
+  };
 
   function save() {
     try {
@@ -165,6 +175,7 @@
     if (!confirm('このセットを削除しますか?')) return;
     state.sets = state.sets.filter((s) => s.id !== id);
     save();
+    Cloud.removeSet(id);
     renderRecord();
     renderHistory();
   }
@@ -184,8 +195,10 @@
     const reps = parseInt($('#reps').value, 10);
     if (!machineById(selId)) return toast('マシンを選んでください');
     if (!(weight >= 0) || !(reps > 0)) return toast('重量と回数を入力してください');
-    state.sets.push({ id: uid(), machineId: selId, weight, reps, ts: Date.now() });
+    const set = { id: uid(), machineId: selId, weight, reps, ts: Date.now() };
+    state.sets.push(set);
     save();
+    Cloud.upsertSet(set);
     renderRecord();
     if (state.settings.autoStart) startTimer();
     toast(`記録しました: ${fmtW(weight)} × ${reps}`);
@@ -236,6 +249,7 @@
     }
     $('#opt-auto').checked = !!state.settings.autoStart;
     $('#opt-step').value = String(state.settings.step);
+    renderCloud();
   }
 
   $('#machine-form').addEventListener('submit', (e) => {
@@ -244,8 +258,10 @@
     const name = input.value.trim();
     if (!name) return;
     if (state.machines.some((m) => m.name === name)) return toast('同じ名前のマシンがあります');
-    state.machines.push({ id: uid(), name });
+    const machine = { id: uid(), name, createdAt: Date.now() };
+    state.machines.push(machine);
     save();
+    Cloud.upsertMachine(machine);
     input.value = '';
     renderAdmin();
     toast(`追加しました: ${name}`);
@@ -258,6 +274,7 @@
     if (state.machines.some((x) => x.id !== id && x.name === name)) return toast('同じ名前のマシンがあります');
     m.name = name;
     save();
+    Cloud.upsertMachine(m);
     renderAdmin();
   }
 
@@ -265,10 +282,12 @@
     const m = machineById(id);
     const n = state.sets.filter((s) => s.machineId === id).length;
     if (!confirm(`「${m.name}」を削除しますか?${n ? `\nこのマシンの記録 ${n} セットも削除されます。` : ''}`)) return;
+    const setIds = state.sets.filter((s) => s.machineId === id).map((s) => s.id);
     state.machines = state.machines.filter((x) => x.id !== id);
     state.sets = state.sets.filter((s) => s.machineId !== id);
     if (selId === id) selId = null;
     save();
+    Cloud.removeMachineAndSets(id, setIds);
     renderAdmin();
   }
 
@@ -327,15 +346,28 @@
       const sets = (data.sets || []).filter((s) => s && typeof s.machineId === 'string'
         && Number.isFinite(s.weight) && Number.isFinite(s.reps) && Number.isFinite(s.ts));
       if (!machines.length && !sets.length) throw new Error('empty');
-      if (!confirm(`マシン ${machines.length} 件、記録 ${sets.length} セットを読み込みます。\n今のデータは置き換えられます。よろしいですか?`)) return;
-      const d = defaults();
-      state = {
-        ...d,
-        machines: machines.map((m) => ({ id: m.id, name: m.name })),
-        sets: sets.map((s) => ({ id: typeof s.id === 'string' ? s.id : uid(), machineId: s.machineId, weight: s.weight, reps: s.reps, ts: s.ts })),
-        lastMachine: data.lastMachine ?? null,
-        settings: { ...d.settings, ...(data.settings || {}) },
-      };
+      const merge = Cloud.signedIn; // クラウド同期中は、他の端末の記録を消さないよう「追加」にする
+      const msg = merge
+        ? `マシン ${machines.length} 件、記録 ${sets.length} セットを追加します。\n同じIDの記録は上書きされます。よろしいですか?`
+        : `マシン ${machines.length} 件、記録 ${sets.length} セットを読み込みます。\n今のデータは置き換えられます。よろしいですか?`;
+      if (!confirm(msg)) return;
+      const nm = machines.map((m, i) => ({ id: m.id, name: m.name, createdAt: Number.isFinite(m.createdAt) ? m.createdAt : i }));
+      const ns = sets.map((s) => ({ id: typeof s.id === 'string' ? s.id : uid(), machineId: s.machineId, weight: s.weight, reps: s.reps, ts: s.ts }));
+      if (merge) {
+        const byId = (list, add) => [...new Map([...list, ...add].map((x) => [x.id, x])).values()];
+        state.machines = byId(state.machines, nm).sort((a, b) => a.createdAt - b.createdAt);
+        state.sets = byId(state.sets, ns);
+        Cloud.bulkUpsert(nm, ns);
+      } else {
+        const d = defaults();
+        state = {
+          ...d,
+          machines: nm,
+          sets: ns,
+          lastMachine: data.lastMachine ?? null,
+          settings: { ...d.settings, ...(data.settings || {}) },
+        };
+      }
       selId = null;
       save();
       renderAdmin();
@@ -475,7 +507,81 @@
     }
   });
 
+  /* ---------- クラウド同期 ---------- */
+  let cloudStatus = { phase: 'loading', email: '', pending: false };
+  let lastErrorAt = 0;
+
+  function renderCloud() {
+    const box = $('#cloud-card');
+    const { phase, email, pending } = cloudStatus;
+    const note = (t) => h('p', { class: 'muted' }, t);
+    let body;
+    if (phase === 'loading') {
+      body = [note('クラウド機能を準備しています…')];
+    } else if (phase === 'unavailable') {
+      body = [note('クラウドに接続できません。電波のある場所で開き直すと使えるようになります。それまでは、この端末だけに記録されます。')];
+    } else if (phase === 'signedout') {
+      body = [
+        note('Googleアカウントでログインすると、記録がクラウドに保存され、ほかの端末と共有できます。この端末にある今の記録は、初回ログイン時にクラウドへ移されます。'),
+        h('button', { class: 'btn primary', type: 'button', onclick: () => Cloud.signIn() }, 'Googleでログイン'),
+      ];
+    } else {
+      const label = phase === 'error' ? '同期に失敗しました' : phase === 'syncing' ? '同期しています…' : pending ? '同期待ち(オフライン、または送信中)' : '同期済み';
+      body = [
+        h('div', { class: 'cloud-user' }, h('strong', {}, email || 'ログイン中'), h('span', { class: `sync-state${pending || phase !== 'ready' ? ' wait' : ''}` }, label)),
+        h('button', { class: 'btn', type: 'button', onclick: doSignOut }, 'ログアウト'),
+      ];
+    }
+    box.replaceChildren(...body);
+  }
+
+  async function doSignOut() {
+    if (!confirm('ログアウトします。\nこの端末の記録は消去されます(クラウドには残り、次回ログインで戻ります)。\nよろしいですか?')) return;
+    await Cloud.signOut();
+    state = defaults();
+    selId = null;
+    save();
+    renderRecord();
+    renderHistory();
+    renderAdmin();
+  }
+
+  function errorMessage(e) {
+    const code = (e && e.code) || '';
+    if (code === 'permission-denied') return '同期が許可されていません(Firestoreのルールを確認してください)';
+    if (code === 'auth/unauthorized-domain') return 'このドメインはFirebaseで許可されていません';
+    if (code === 'auth/operation-not-allowed') return 'FirebaseでGoogleログインが有効になっていません';
+    if (code === 'auth/network-request-failed' || code === 'unavailable') return '通信できませんでした';
+    return `同期エラー: ${code || (e && e.message) || '不明'}`;
+  }
+
+  const cloudHooks = {
+    getLocal: () => state,
+    dropLocal: () => { state = defaults(); selId = null; },
+    setOwner: (uid) => { state.owner = uid; save(); },
+    onStatus: (s) => { cloudStatus = s; renderCloud(); },
+    onError: (e) => {
+      console.error(e);
+      if (Date.now() - lastErrorAt < 3000) return;
+      lastErrorAt = Date.now();
+      toast(errorMessage(e));
+    },
+    onRemote: (kind, items) => {
+      if (kind === 'machines') {
+        state.machines = items.filter((m) => m.name).sort((a, b) => a.createdAt - b.createdAt);
+      } else {
+        state.sets = items.filter((s) => s.machineId && Number.isFinite(s.weight) && s.reps > 0 && Number.isFinite(s.ts));
+      }
+      save();
+      renderRecord();
+      if ($('#view-history').classList.contains('active')) renderHistory();
+      if ($('#view-admin').classList.contains('active')) renderAdmin();
+    },
+  };
+
   /* ---------- 起動 ---------- */
+  renderCloud();
+  Cloud.init(cloudHooks);
   renderPresets();
   if (T.endAt && T.endAt <= Date.now()) { T.endAt = 0; persistTimer(); }
   if (T.endAt) { requestWake(); ensureTick(); }

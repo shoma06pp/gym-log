@@ -1,11 +1,13 @@
 // アプリ本体をキャッシュして、電波の弱いジムでも開けるようにする。
 // ファイルを更新したら CACHE の番号を上げること(古いキャッシュが破棄される)。
-const CACHE = 'gymlog-v1';
+const CACHE = 'gymlog-v2';
 const ASSETS = [
   './',
   'index.html',
   'style.css',
   'app.js',
+  'cloud.js',
+  'firebase-config.js',
   'manifest.webmanifest',
   'icons/icon.svg',
   'icons/icon-192.png',
@@ -28,7 +30,10 @@ self.addEventListener('activate', (e) => {
 // キャッシュを先に返し、裏で最新を取得して次回に反映する
 self.addEventListener('fetch', (e) => {
   const req = e.request;
-  if (req.method !== 'GET' || new URL(req.url).origin !== self.location.origin) return;
+  const url = new URL(req.url);
+  // Firebase SDK (gstatic) は初回のあとキャッシュして、オフラインでも起動できるようにする
+  const isSdk = url.origin === 'https://www.gstatic.com' && url.pathname.startsWith('/firebasejs/');
+  if (req.method !== 'GET' || (url.origin !== self.location.origin && !isSdk)) return;
   e.respondWith(
     caches.match(req, { ignoreSearch: true }).then((cached) => {
       const network = fetch(req).then((res) => {

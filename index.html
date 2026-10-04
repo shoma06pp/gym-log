@@ -62,6 +62,9 @@
 
     <!-- 管理 -->
     <section id="view-admin" class="view" aria-label="管理">
+      <h2>クラウド同期</h2>
+      <div id="cloud-card" class="card cloud"></div>
+
       <h2>マシンの登録</h2>
       <form id="machine-form" class="card row-form">
         <input id="machine-name" type="text" maxlength="40" placeholder="例: レッグプレス" autocomplete="off" aria-label="マシン名">
@@ -123,6 +126,8 @@
   </nav>
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <script src="firebase-config.js"></script>
+  <script src="cloud.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

@@ -105,6 +105,13 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
   border-radius: 10px; min-height: 40px; padding: 0 8px;
 }
 
+/* クラウド同期 */
+.cloud .muted { margin-bottom: 12px; }
+.cloud .btn { width: 100%; }
+.cloud-user { display: flex; flex-direction: column; gap: 2px; margin-bottom: 12px; overflow-wrap: anywhere; }
+.sync-state { font-size: 13px; color: var(--done); }
+.sync-state.wait { color: var(--muted); }
+
 /* 履歴 */
 .day { margin-top: 18px; }
 .day h3 { font-size: 15px; margin: 0 0 8px; }
