@@ -4,7 +4,7 @@
   const STORE_KEY = 'gymlog.v1';
   const TIMER_KEY = 'gymlog.timerEnd';
   const PRESETS = [60, 90, 120, 180];
-  const APP_VERSION = 'v11'; // sw.js の CACHE の番号と揃える
+  const APP_VERSION = 'v12'; // sw.js の CACHE の番号と揃える
   const PARTS = ['胸', '背中', '肩', '腕', '脚', '腹', 'その他'];
   const NO_PART = '未分類';
 
@@ -292,11 +292,19 @@
   // iPhone のホーム画面アプリでは、window の高さが実画面より上端の安全領域の分(約59pt)低く報告され、
   // アプリの描画範囲の下に、アプリの外の余白ができる(伸ばしても切り取られるため、アプリ側では埋められない)。
   // その外側にホームバーが入るので、タブバー内の下の安全余白(env(safe-area-inset-bottom))は重複して不要になる。
+  // 差(gap)が上の安全領域と一致するときだけ、この不具合とみなす(ステータスバーが画面に重ならない設定のときの差は不具合ではない)。
   let noBottomInset = false;
+  function measureInsetTop() {
+    const probe = h('div', { style: 'position:fixed;visibility:hidden;left:0;top:0;padding-top:env(safe-area-inset-top)' });
+    document.body.append(probe);
+    const v = parseFloat(getComputedStyle(probe).paddingTop) || 0;
+    probe.remove();
+    return v;
+  }
   function fitFooter() {
     const standalone = navigator.standalone === true || matchMedia('(display-mode: standalone)').matches;
     const gap = standalone && innerHeight > innerWidth ? Math.max(screen.width, screen.height) - innerHeight : 0;
-    noBottomInset = gap > 0 && gap <= 100;
+    noBottomInset = gap > 0 && gap <= 100 && Math.abs(gap - measureInsetTop()) <= 2;
     document.documentElement.style.setProperty('--safe-bottom', noBottomInset ? '0px' : 'env(safe-area-inset-bottom)');
   }
   fitFooter();
