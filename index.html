@@ -27,6 +27,14 @@
       </div>
 
       <div id="record-body">
+        <div id="mode-chips" class="chips seg" role="radiogroup" aria-label="記録の種類"></div>
+
+        <div id="mode-empty" class="empty" hidden>
+          <p id="mode-empty-text"></p>
+          <button class="btn primary" data-goto="admin">マシンを登録する</button>
+        </div>
+
+        <div id="mode-body">
         <div id="part-wrap">
           <h2>部位</h2>
           <div id="part-chips" class="chips" role="radiogroup" aria-label="部位を選択"></div>
@@ -37,7 +45,28 @@
 
         <div id="last-session" class="card last"></div>
 
-        <div class="card inputs">
+        <!-- 有酸素(ランニングマシンなど): 距離とカロリーだけを記録する -->
+        <div id="cardio-inputs" class="card inputs" hidden>
+          <div class="field">
+            <label for="distance">距離 (km)</label>
+            <div class="stepper">
+              <button type="button" class="step" data-target="distance" data-dir="-1" aria-label="距離を減らす">−</button>
+              <input id="distance" type="number" inputmode="decimal" min="0" step="any" value="3">
+              <button type="button" class="step" data-target="distance" data-dir="1" aria-label="距離を増やす">＋</button>
+            </div>
+          </div>
+          <div class="field">
+            <label for="calories">カロリー (kcal)</label>
+            <div class="stepper">
+              <button type="button" class="step" data-target="calories" data-dir="-1" aria-label="カロリーを減らす">−</button>
+              <input id="calories" type="number" inputmode="numeric" min="0" step="any" value="200">
+              <button type="button" class="step" data-target="calories" data-dir="1" aria-label="カロリーを増やす">＋</button>
+            </div>
+          </div>
+          <button id="add-cardio" type="button" class="btn primary big">有酸素を記録</button>
+        </div>
+
+        <div id="strength-inputs" class="card inputs">
           <div class="field">
             <label for="weight">重量 (kg)</label>
             <div class="stepper">
@@ -57,8 +86,9 @@
           <button id="add-set" type="button" class="btn primary big">セットを記録</button>
         </div>
 
-        <h2>今日のセット</h2>
+        <h2>今日の記録</h2>
         <div id="today-sets" class="card list"></div>
+        </div>
       </div>
     </section>
 
@@ -74,7 +104,13 @@
 
       <h2>マシンの登録</h2>
       <form id="machine-form" class="card row-form">
-        <select id="machine-part" class="part-select" aria-label="部位"></select>
+        <div class="form-selects">
+          <select id="machine-kind" class="part-select" aria-label="種類">
+            <option value="strength">筋トレ</option>
+            <option value="cardio">有酸素</option>
+          </select>
+          <select id="machine-part" class="part-select" aria-label="部位"></select>
+        </div>
         <input id="machine-name" type="text" maxlength="40" placeholder="例: レッグプレス" autocomplete="off" aria-label="マシン名">
         <button class="btn primary" type="submit">追加</button>
       </form>
@@ -95,6 +131,15 @@
             <option value="10">10 kg</option>
           </select>
         </label>
+        <label class="switch-row">
+          <span>休憩終了の音量</span>
+          <select id="opt-volume">
+            <option value="mid">普通</option>
+            <option value="high">大</option>
+            <option value="max">最大</option>
+          </select>
+        </label>
+        <button id="test-sound" type="button" class="btn">休憩終了の音を確認</button>
       </div>
 
       <h2>表示情報(調査用)</h2>

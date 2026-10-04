@@ -8,30 +8,44 @@ service cloud.firestore {
       return request.auth != null && request.auth.uid == uid;
     }
 
+    // 筋トレの記録: 重量と回数
+    function isStrengthSet(d) {
+      return d.keys().hasAll(['machineId', 'weight', 'reps', 'ts'])
+        && d.keys().hasOnly(['machineId', 'weight', 'reps', 'ts'])
+        && d.machineId is string
+        && d.weight is number && d.weight >= 0 && d.weight <= 2000
+        && d.reps is number && d.reps > 0 && d.reps <= 1000
+        && d.ts is number;
+    }
+
+    // 有酸素の記録: 距離(km)とカロリー(kcal)
+    function isCardioSet(d) {
+      return d.keys().hasAll(['machineId', 'distance', 'calories', 'ts'])
+        && d.keys().hasOnly(['machineId', 'distance', 'calories', 'ts'])
+        && d.machineId is string
+        && d.distance is number && d.distance >= 0 && d.distance <= 1000
+        && d.calories is number && d.calories >= 0 && d.calories <= 20000
+        && d.ts is number;
+    }
+
     match /users/{uid}/gymlog_machines/{id} {
       allow read, delete: if isOwner(uid);
       allow create, update: if isOwner(uid)
-        && request.resource.data.keys().hasOnly(['name', 'createdAt', 'part'])
+        && request.resource.data.keys().hasOnly(['name', 'createdAt', 'part', 'kind'])
         && request.resource.data.name is string
         && request.resource.data.name.size() > 0
         && request.resource.data.name.size() <= 40
         && request.resource.data.createdAt is number
         && (!('part' in request.resource.data)
-            || (request.resource.data.part is string && request.resource.data.part.size() <= 10));
+            || (request.resource.data.part is string && request.resource.data.part.size() <= 10))
+        && (!('kind' in request.resource.data)
+            || request.resource.data.kind in ['strength', 'cardio']);
     }
 
     match /users/{uid}/gymlog_sets/{id} {
       allow read, delete: if isOwner(uid);
       allow create, update: if isOwner(uid)
-        && request.resource.data.keys().hasOnly(['machineId', 'weight', 'reps', 'ts'])
-        && request.resource.data.machineId is string
-        && request.resource.data.weight is number
-        && request.resource.data.weight >= 0
-        && request.resource.data.weight <= 2000
-        && request.resource.data.reps is number
-        && request.resource.data.reps > 0
-        && request.resource.data.reps <= 1000
-        && request.resource.data.ts is number;
+        && (isStrengthSet(request.resource.data) || isCardioSet(request.resource.data));
     }
   }
 }

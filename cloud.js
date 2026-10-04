@@ -32,9 +32,19 @@
   }
 
   const col = (name) => db.collection('users').doc(user.uid).collection(`gymlog_${name}`);
-  // 部位は未設定のとき保存しない(古いルールのままでも、既存の書き込みが通るように)
-  const machineData = (m) => (m.part ? { name: m.name, createdAt: m.createdAt, part: m.part } : { name: m.name, createdAt: m.createdAt });
-  const setData = (s) => ({ machineId: s.machineId, weight: s.weight, reps: s.reps, ts: s.ts });
+  // 部位・種類は、設定があるときだけ保存する(筋トレの記録は、古いルールのままでも通るように)
+  const machineData = (m) => {
+    const d = { name: m.name, createdAt: m.createdAt };
+    if (m.part) d.part = m.part;
+    if (m.kind === 'cardio') d.kind = 'cardio';
+    return d;
+  };
+  // 有酸素の記録は distance と calories、筋トレの記録は weight と reps を持つ
+  const isCardioSet = (s) => Number.isFinite(s.distance);
+  const setData = (s) => (isCardioSet(s)
+    ? { machineId: s.machineId, distance: s.distance, calories: s.calories, ts: s.ts }
+    : { machineId: s.machineId, weight: s.weight, reps: s.reps, ts: s.ts });
+  const num = (v) => (typeof v === 'number' ? v : undefined);
 
   async function commit(ops) {
     for (let i = 0; i < ops.length; i += BATCH_MAX) {
@@ -76,8 +86,14 @@
       hooks.onRemote(name, snap.docs.map((d) => ({ id: d.id, ...toItem(d.data()) })));
     }, (err) => hooks.onError(err));
     unsubs = [
-      watch('machines', (d) => ({ name: String(d.name ?? ''), createdAt: Number(d.createdAt) || 0, part: typeof d.part === 'string' ? d.part : '' })),
-      watch('sets', (d) => ({ machineId: String(d.machineId ?? ''), weight: Number(d.weight), reps: Number(d.reps), ts: Number(d.ts) })),
+      watch('machines', (d) => ({
+        name: String(d.name ?? ''), createdAt: Number(d.createdAt) || 0,
+        part: typeof d.part === 'string' ? d.part : '', kind: d.kind === 'cardio' ? 'cardio' : 'strength',
+      })),
+      watch('sets', (d) => ({
+        machineId: String(d.machineId ?? ''), ts: Number(d.ts),
+        weight: num(d.weight), reps: num(d.reps), distance: num(d.distance), calories: num(d.calories),
+      })),
     ];
   }
 

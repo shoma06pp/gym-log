@@ -4,7 +4,8 @@
   const STORE_KEY = 'gymlog.v1';
   const TIMER_KEY = 'gymlog.timerEnd';
   const PRESETS = [60, 90, 120, 180];
-  const APP_VERSION = 'v12'; // sw.js の CACHE の番号と揃える
+  const APP_VERSION = 'v13'; // sw.js の CACHE の番号と揃える
+  const VOLUMES = { mid: 0.5, high: 0.85, max: 1 }; // 休憩終了の音量
   const PARTS = ['胸', '背中', '肩', '腕', '脚', '腹', 'その他'];
   const NO_PART = '未分類';
 
@@ -32,8 +33,9 @@
     sets: [],
     lastMachine: null,
     lastPart: 'all', // 記録画面で選んでいる部位 ('all' = すべて)
+    lastMode: 'strength', // 記録画面で選んでいる種類 ('strength' = 筋トレ / 'cardio' = 有酸素)
     owner: null, // クラウドと同期した Firebase ユーザーID
-    settings: { interval: 90, autoStart: true, step: 2.5 },
+    settings: { interval: 90, autoStart: true, step: 2.5, volume: 'high' },
   });
 
   function load() {
@@ -42,7 +44,10 @@
       if (s && Array.isArray(s.machines) && Array.isArray(s.sets)) {
         const d = defaults();
         const st = { ...d, ...s, settings: { ...d.settings, ...s.settings } };
-        st.machines.forEach((m, i) => { if (!Number.isFinite(m.createdAt)) m.createdAt = i; });
+        st.machines.forEach((m, i) => {
+          if (!Number.isFinite(m.createdAt)) m.createdAt = i;
+          m.kind = m.kind === 'cardio' ? 'cardio' : 'strength';
+        });
         return st;
       }
     } catch (e) { /* 壊れていたら初期化 */ }
@@ -67,13 +72,33 @@
   }
 
   const machineById = (id) => state.machines.find((m) => m.id === id);
+  const isCardio = (m) => !!m && m.kind === 'cardio';
+  const isCardioSet = (s) => Number.isFinite(s.distance);
+  const strengthMachines = () => state.machines.filter((m) => !isCardio(m));
+  const cardioMachines = () => state.machines.filter(isCardio);
   const partOf = (m) => (PARTS.includes(m.part) ? m.part : NO_PART);
   const partsPresent = () => {
-    const present = new Set(state.machines.map(partOf));
+    const present = new Set(strengthMachines().map(partOf));
     return [...PARTS, NO_PART].filter((p) => present.has(p));
   };
   const fmtW = (n) => (n === 0 ? '自重' : Number.isInteger(n) ? `${n}kg` : `${+n.toFixed(2)}kg`);
-  const fmtSet = (s) => `${fmtW(s.weight)} × ${s.reps}`;
+  const fmtDist = (n) => `${+n.toFixed(2)}km`;
+  const fmtCal = (n) => `${Math.round(n)}kcal`;
+  const fmtSet = (s) => (isCardioSet(s) ? `${fmtDist(s.distance)} / ${fmtCal(s.calories)}` : `${fmtW(s.weight)} × ${s.reps}`);
+
+  // 同じ重量・回数(有酸素なら同じ距離・カロリー)が続いたセットを1行にまとめる。
+  // 例: 30kg × 10 を3セット → { sets: [3つ], count: 3 }
+  const setKey = (s) => (isCardioSet(s) ? `c|${s.distance}|${s.calories}` : `s|${s.weight}|${s.reps}`);
+  function groupSets(sets) {
+    const groups = [];
+    for (const s of sets) {
+      const last = groups[groups.length - 1];
+      if (last && last.key === setKey(s)) last.sets.push(s);
+      else groups.push({ key: setKey(s), sets: [s] });
+    }
+    return groups.map((g) => ({ ...g, first: g.sets[0], last: g.sets[g.sets.length - 1], count: g.sets.length }));
+  }
+  const fmtGroup = (g) => (g.count > 1 ? `${fmtSet(g.first)} ×${g.count}` : fmtSet(g.first));
 
   function dayKey(ts) {
     const d = new Date(ts);
@@ -125,10 +150,16 @@
     return { key, sets: prev.filter((s) => dayKey(s.ts) === key).sort((a, b) => a.ts - b.ts) };
   }
 
+  // 入力欄の初期値は、そのマシンの直近の記録にする(なければ標準値)
   function prefillInputs(id) {
     const last = latestSet(id);
-    $('#weight').value = last ? last.weight : 20;
-    $('#reps').value = last ? last.reps : 10;
+    if (isCardio(machineById(id))) {
+      $('#distance').value = last && isCardioSet(last) ? last.distance : 3;
+      $('#calories').value = last && isCardioSet(last) ? last.calories : 200;
+    } else {
+      $('#weight').value = last && !isCardioSet(last) ? last.weight : 20;
+      $('#reps').value = last && !isCardioSet(last) ? last.reps : 10;
+    }
   }
 
   function selectMachine(id) {
@@ -139,17 +170,43 @@
     renderRecord();
   }
 
+  function setMode(mode) {
+    state.lastMode = mode;
+    save();
+    renderRecord();
+  }
+
   function renderRecord() {
     const has = state.machines.length > 0;
     $('#record-empty').hidden = has;
     $('#record-body').hidden = !has;
     if (!has) return;
 
-    // 部位で絞り込む。選んだ部位にマシンがなければ「すべて」に戻す
-    const parts = partsPresent();
+    // 筋トレ / 有酸素 の切り替え
+    const mode = state.lastMode === 'cardio' ? 'cardio' : 'strength';
+    const cardio = mode === 'cardio';
+    $('#mode-chips').replaceChildren(...[['strength', '筋トレ'], ['cardio', '有酸素']].map(([key, label]) =>
+      h('button', {
+        class: 'chip', type: 'button', role: 'radio',
+        'aria-checked': String(key === mode),
+        onclick: () => setMode(key),
+      }, label)));
+
+    const pool = cardio ? cardioMachines() : strengthMachines();
+    $('#mode-empty').hidden = pool.length > 0;
+    $('#mode-body').hidden = pool.length === 0;
+    if (!pool.length) {
+      $('#mode-empty-text').textContent = cardio
+        ? '有酸素のマシンがまだありません。「管理」で、種類を「有酸素」にして登録してください。'
+        : '筋トレのマシンがまだありません。';
+      return;
+    }
+
+    // 筋トレは部位で絞り込む。選んだ部位にマシンがなければ「すべて」に戻す
+    const parts = cardio ? [] : partsPresent();
     let partSel = state.lastPart;
     if (partSel !== 'all' && !parts.includes(partSel)) partSel = 'all';
-    const visible = partSel === 'all' ? state.machines : state.machines.filter((m) => partOf(m) === partSel);
+    const visible = partSel === 'all' ? pool : pool.filter((m) => partOf(m) === partSel);
 
     if (!visible.some((m) => m.id === selId)) {
       const next = visible.find((m) => m.id === state.lastMachine) || visible[0];
@@ -157,13 +214,16 @@
       prefillInputs(next.id);
     }
 
-    $('#part-wrap').hidden = parts.length < 2;
+    $('#part-wrap').hidden = cardio || parts.length < 2;
     $('#part-chips').replaceChildren(...['all', ...parts].map((p) =>
       h('button', {
         class: 'chip', type: 'button', role: 'radio',
         'aria-checked': String(p === partSel),
         onclick: () => { state.lastPart = p; save(); renderRecord(); },
       }, p === 'all' ? 'すべて' : p)));
+
+    $('#strength-inputs').hidden = cardio;
+    $('#cardio-inputs').hidden = !cardio;
 
     const chips = $('#machine-chips');
     chips.replaceChildren(...visible.map((m) =>
@@ -177,7 +237,7 @@
     const lastBox = $('#last-session');
     lastBox.replaceChildren(
       ls
-        ? h('div', {}, '前回 ', h('strong', {}, dayLabel(ls.key)), h('div', { class: 'sets' }, ls.sets.map(fmtSet).join(' / ')))
+        ? h('div', {}, '前回 ', h('strong', {}, dayLabel(ls.key)), h('div', { class: 'sets' }, groupSets(ls.sets).map(fmtGroup).join(' / ')))
         : h('div', {}, 'このマシンの前回の記録はまだありません'));
 
     const today = dayKey(Date.now());
@@ -190,12 +250,13 @@
         h('span', { class: 'num' }, String(i + 1)),
         h('span', { class: 'grow val' }, fmtSet(s)),
         h('span', { class: 'time' }, timeLabel(s.ts)),
-        h('button', { class: 'icon-btn', type: 'button', 'aria-label': 'このセットを削除', onclick: () => deleteSet(s.id) }, '✕'))));
+        h('button', { class: 'icon-btn', type: 'button', 'aria-label': 'この記録を削除', onclick: () => deleteSet(s.id) }, '✕'))));
     }
   }
 
-  function deleteSet(id) {
-    if (!confirm('このセットを削除しますか?')) return;
+  function deleteSet(id, count = 1) {
+    const msg = count > 1 ? `この記録(${count}セット)から、最後の1セットを削除しますか?` : 'この記録を削除しますか?';
+    if (!confirm(msg)) return;
     state.sets = state.sets.filter((s) => s.id !== id);
     save();
     Cloud.removeSet(id);
@@ -203,13 +264,18 @@
     renderHistory();
   }
 
+  // ＋/− ボタン: 入力欄ごとの刻みと下限
+  const stepConfig = {
+    weight: () => ({ step: Number(state.settings.step) || 2.5, min: 0 }),
+    reps: () => ({ step: 1, min: 1 }),
+    distance: () => ({ step: 0.1, min: 0 }),
+    calories: () => ({ step: 10, min: 0 }),
+  };
   document.querySelectorAll('.step').forEach((b) => b.addEventListener('click', () => {
     const input = $(`#${b.dataset.target}`);
-    const dir = Number(b.dataset.dir);
-    const step = b.dataset.target === 'weight' ? Number(state.settings.step) || 2.5 : 1;
-    const min = b.dataset.target === 'weight' ? 0 : 1;
+    const { step, min } = stepConfig[b.dataset.target]();
     const cur = parseFloat(input.value);
-    const next = Math.max(min, Math.round(((Number.isNaN(cur) ? 0 : cur) + dir * step) * 100) / 100);
+    const next = Math.max(min, Math.round(((Number.isNaN(cur) ? 0 : cur) + Number(b.dataset.dir) * step) * 100) / 100);
     input.value = next;
   }));
 
@@ -225,6 +291,20 @@
     renderRecord();
     if (state.settings.autoStart) startTimer();
     toast(`記録しました: ${fmtW(weight)} × ${reps}`);
+  });
+
+  // 有酸素は距離とカロリーだけ。休憩のインターバルは動かさない
+  $('#add-cardio').addEventListener('click', () => {
+    const distance = Math.round(parseFloat($('#distance').value) * 100) / 100;
+    const calories = Math.round(parseFloat($('#calories').value));
+    if (!isCardio(machineById(selId))) return toast('マシンを選んでください');
+    if (!(distance >= 0) || !(calories >= 0) || (distance === 0 && calories === 0)) return toast('距離かカロリーを入力してください');
+    const set = { id: uid(), machineId: selId, distance, calories, ts: Date.now() };
+    state.sets.push(set);
+    save();
+    Cloud.upsertSet(set);
+    renderRecord();
+    toast(`記録しました: ${fmtSet(set)}`);
   });
 
   /* ---------- 履歴 ---------- */
@@ -246,13 +326,15 @@
     for (const k of [...days.keys()].sort().reverse()) {
       const dayEl = h('div', { class: 'day' }, h('h3', {}, dayLabel(k)));
       for (const [mid, sets] of days.get(k)) {
+        // 同じ重量・回数のセットは1行にまとめ、「3セット」のように回数を示す
+        const rows = groupSets(sets).map((g) => h('div', { class: 'row' },
+          h('span', { class: 'grow val' }, fmtSet(g.first)),
+          g.count > 1 || !isCardioSet(g.first) ? h('span', { class: 'pill' }, `${g.count}セット`) : null,
+          h('span', { class: 'time' }, timeLabel(g.last.ts)),
+          h('button', { class: 'icon-btn', type: 'button', 'aria-label': 'この記録を削除', onclick: () => deleteSet(g.last.id, g.count) }, '✕')));
         dayEl.append(h('div', { class: 'card' },
           h('div', { class: 'mname' }, machineById(mid)?.name ?? '(削除済みのマシン)'),
-          ...sets.map((s, i) => h('div', { class: 'row' },
-            h('span', { class: 'num' }, String(i + 1)),
-            h('span', { class: 'grow val' }, fmtSet(s)),
-            h('span', { class: 'time' }, timeLabel(s.ts)),
-            h('button', { class: 'icon-btn', type: 'button', 'aria-label': 'このセットを削除', onclick: () => deleteSet(s.id) }, '✕')))));
+          ...rows));
       }
       out.push(dayEl);
     }
@@ -266,10 +348,11 @@
       list.replaceChildren(h('div', { class: 'none' }, 'マシンを追加してください'));
     } else {
       const rows = [];
+      const strength = strengthMachines();
       for (const part of [...PARTS, NO_PART]) {
-        const ms = state.machines.filter((m) => partOf(m) === part);
+        const ms = strength.filter((m) => partOf(m) === part);
         if (!ms.length) continue;
-        rows.push(h('div', { class: 'group-head' }, `${part}(${ms.length})`));
+        rows.push(h('div', { class: 'group-head' }, `筋トレ・${part}(${ms.length})`));
         for (const m of ms) {
           rows.push(h('div', { class: 'row' },
             h('span', { class: 'grow' }, m.name),
@@ -281,10 +364,21 @@
             h('button', { class: 'icon-btn', type: 'button', 'aria-label': `${m.name}を削除`, onclick: () => deleteMachine(m.id) }, '✕')));
         }
       }
+      const cardio = cardioMachines();
+      if (cardio.length) {
+        rows.push(h('div', { class: 'group-head' }, `有酸素(${cardio.length})`));
+        for (const m of cardio) {
+          rows.push(h('div', { class: 'row' },
+            h('span', { class: 'grow' }, m.name),
+            h('button', { class: 'icon-btn', type: 'button', 'aria-label': `${m.name}の名前を変更`, onclick: () => renameMachine(m.id) }, '✎'),
+            h('button', { class: 'icon-btn', type: 'button', 'aria-label': `${m.name}を削除`, onclick: () => deleteMachine(m.id) }, '✕')));
+        }
+      }
       list.replaceChildren(...rows);
     }
     $('#opt-auto').checked = !!state.settings.autoStart;
     $('#opt-step').value = String(state.settings.step);
+    $('#opt-volume').value = state.settings.volume in VOLUMES ? state.settings.volume : 'high';
     renderCloud();
     renderDiag();
   }
@@ -351,8 +445,12 @@
     renderAdmin();
   }
 
-  // 登録フォームの部位は、続けて登録しやすいよう前回の選択を覚えておく
+  // 登録フォームの種類・部位は、続けて登録しやすいよう前回の選択を覚えておく
   $('#machine-part').replaceChildren(...partOptions(''));
+  // 有酸素には部位がないので、種類が有酸素のときは部位の選択を隠す
+  $('#machine-kind').addEventListener('change', () => {
+    $('#machine-part').hidden = $('#machine-kind').value === 'cardio';
+  });
 
   $('#machine-form').addEventListener('submit', (e) => {
     e.preventDefault();
@@ -360,7 +458,8 @@
     const name = input.value.trim();
     if (!name) return;
     if (state.machines.some((m) => m.name === name)) return toast('同じ名前のマシンがあります');
-    const machine = { id: uid(), name, createdAt: Date.now(), part: $('#machine-part').value };
+    const kind = $('#machine-kind').value === 'cardio' ? 'cardio' : 'strength';
+    const machine = { id: uid(), name, createdAt: Date.now(), kind, part: kind === 'cardio' ? '' : $('#machine-part').value };
     state.machines.push(machine);
     save();
     Cloud.upsertMachine(machine);
@@ -395,6 +494,8 @@
 
   $('#opt-auto').addEventListener('change', (e) => { state.settings.autoStart = e.target.checked; save(); });
   $('#opt-step').addEventListener('change', (e) => { state.settings.step = Number(e.target.value); save(); });
+  $('#opt-volume').addEventListener('change', (e) => { state.settings.volume = e.target.value; save(); });
+  $('#test-sound').addEventListener('click', () => { ensureAudio(); rebuildAudioIfStuck(); beep(); });
 
   /* ---------- バックアップ / Claudeへの共有 ---------- */
   function buildSummaryText() {
@@ -410,7 +511,9 @@
     for (const k of [...days.keys()].sort().reverse()) {
       lines.push('', `## ${k}`);
       for (const [mid, sets] of days.get(k)) {
-        lines.push(`- ${machineById(mid)?.name ?? '(削除済み)'}: ${sets.map(fmtSet).join(', ')}`);
+        const m = machineById(mid);
+        const label = `${m?.name ?? '(削除済み)'}${isCardio(m) ? '(有酸素)' : ''}`;
+        lines.push(`- ${label}: ${groupSets(sets).map(fmtGroup).join(', ')}`);
       }
     }
     return lines.join('\n');
@@ -445,8 +548,8 @@
     try {
       const data = JSON.parse(await file.text());
       const machines = (data.machines || []).filter((m) => m && typeof m.id === 'string' && typeof m.name === 'string');
-      const sets = (data.sets || []).filter((s) => s && typeof s.machineId === 'string'
-        && Number.isFinite(s.weight) && Number.isFinite(s.reps) && Number.isFinite(s.ts));
+      const sets = (data.sets || []).filter((s) => s && typeof s.machineId === 'string' && Number.isFinite(s.ts)
+        && ((Number.isFinite(s.weight) && Number.isFinite(s.reps)) || (Number.isFinite(s.distance) && Number.isFinite(s.calories))));
       if (!machines.length && !sets.length) throw new Error('empty');
       const merge = Cloud.signedIn; // クラウド同期中は、他の端末の記録を消さないよう「追加」にする
       const msg = merge
@@ -455,8 +558,14 @@
       if (!confirm(msg)) return;
       const nm = machines.map((m, i) => ({
         id: m.id, name: m.name, createdAt: Number.isFinite(m.createdAt) ? m.createdAt : i, part: PARTS.includes(m.part) ? m.part : '',
+        kind: m.kind === 'cardio' ? 'cardio' : 'strength',
       }));
-      const ns = sets.map((s) => ({ id: typeof s.id === 'string' ? s.id : uid(), machineId: s.machineId, weight: s.weight, reps: s.reps, ts: s.ts }));
+      const ns = sets.map((s) => {
+        const base = { id: typeof s.id === 'string' ? s.id : uid(), machineId: s.machineId, ts: s.ts };
+        return Number.isFinite(s.distance) && Number.isFinite(s.calories)
+          ? { ...base, distance: s.distance, calories: s.calories }
+          : { ...base, weight: s.weight, reps: s.reps };
+      });
       if (merge) {
         const byId = (list, add) => [...new Map([...list, ...add].map((x) => [x.id, x])).values()];
         state.machines = byId(state.machines, nm).sort((a, b) => a.createdAt - b.createdAt);
@@ -491,27 +600,54 @@
     try { localStorage.setItem(TIMER_KEY, String(T.endAt)); } catch (e) { /* 無視 */ }
   }
 
-  function unlockAudio() {
+  // 音の出力(AudioContext)を、鳴らせる状態にしておく。
+  // iPhone では、別アプリの音声・電話・画面ロックなどで 'suspended' や 'interrupted' になり、
+  // 画面をタップするまで鳴らなくなる。そのため、タップのたびに状態を確かめて復帰させる。
+  function ensureAudio() {
     try {
-      T.ctx = T.ctx || new (window.AudioContext || window.webkitAudioContext)();
-      if (T.ctx.state === 'suspended') T.ctx.resume();
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return;
+      if (!T.ctx || T.ctx.state === 'closed') T.ctx = new AC();
+      if (T.ctx.state !== 'running') T.ctx.resume().catch(() => { /* 次のタップで再試行 */ });
     } catch (e) { /* 音なしで続行 */ }
   }
+  ['pointerdown', 'touchstart', 'keydown'].forEach((ev) => document.addEventListener(ev, ensureAudio, { passive: true }));
 
+  // 復帰できなかった出力は作り直す(タップの直後に呼ぶ)
+  function rebuildAudioIfStuck() {
+    setTimeout(() => {
+      if (T.ctx && T.ctx.state !== 'running') {
+        try { T.ctx.close(); } catch (e) { /* 無視 */ }
+        T.ctx = null;
+        ensureAudio();
+      }
+    }, 300);
+  }
+
+  // 休憩終了の音: 高めの音を矩形波で、4回+4回のピピピピッ。コンプレッサーで音割れを抑えつつ音量を稼ぐ
   function beep() {
     if (navigator.vibrate) navigator.vibrate([250, 120, 250, 120, 500]);
-    if (!T.ctx) return;
-    const t0 = T.ctx.currentTime;
-    [0, 0.25, 0.5].forEach((off, i) => {
-      const osc = T.ctx.createOscillator();
-      const gain = T.ctx.createGain();
-      osc.frequency.value = i === 2 ? 1175 : 880;
+    ensureAudio();
+    const ctx = T.ctx;
+    if (!ctx) return;
+    const vol = VOLUMES[state.settings.volume] ?? VOLUMES.high;
+    const master = ctx.createGain();
+    master.gain.value = vol;
+    const comp = ctx.createDynamicsCompressor();
+    master.connect(comp).connect(ctx.destination);
+    const t0 = ctx.currentTime + 0.05;
+    [0, 0.25, 0.5, 0.75, 1.3, 1.55, 1.8, 2.05].forEach((off, i) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'square';
+      osc.frequency.value = i % 4 === 3 ? 2093 : 1568;
       gain.gain.setValueAtTime(0.0001, t0 + off);
-      gain.gain.exponentialRampToValueAtTime(0.4, t0 + off + 0.02);
-      gain.gain.exponentialRampToValueAtTime(0.0001, t0 + off + 0.2);
-      osc.connect(gain).connect(T.ctx.destination);
+      gain.gain.exponentialRampToValueAtTime(1, t0 + off + 0.01);
+      gain.gain.setValueAtTime(1, t0 + off + 0.14);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t0 + off + 0.19);
+      osc.connect(gain).connect(master);
       osc.start(t0 + off);
-      osc.stop(t0 + off + 0.22);
+      osc.stop(t0 + off + 0.2);
     });
   }
 
@@ -529,7 +665,8 @@
   }
 
   function startTimer(secs = state.settings.interval) {
-    unlockAudio();
+    ensureAudio();
+    rebuildAudioIfStuck();
     T.endAt = Date.now() + secs * 1000;
     T.doneAt = 0;
     persistTimer();
@@ -605,9 +742,12 @@
   });
 
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible' && T.endAt) {
-      requestWake();
-      tick();
+    if (document.visibilityState === 'visible') {
+      ensureAudio();
+      if (T.endAt) {
+        requestWake();
+        tick();
+      }
     }
   });
 
@@ -674,7 +814,8 @@
       if (kind === 'machines') {
         state.machines = items.filter((m) => m.name).sort((a, b) => a.createdAt - b.createdAt);
       } else {
-        state.sets = items.filter((s) => s.machineId && Number.isFinite(s.weight) && s.reps > 0 && Number.isFinite(s.ts));
+        state.sets = items.filter((s) => s.machineId && Number.isFinite(s.ts)
+          && ((Number.isFinite(s.weight) && s.reps > 0) || (Number.isFinite(s.distance) && Number.isFinite(s.calories))));
       }
       save();
       renderRecord();
