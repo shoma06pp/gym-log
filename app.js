@@ -4,7 +4,7 @@
   const STORE_KEY = 'gymlog.v1';
   const TIMER_KEY = 'gymlog.timerEnd';
   const PRESETS = [60, 90, 120, 180];
-  const APP_VERSION = 'v16'; // sw.js の CACHE の番号と揃える
+  const APP_VERSION = 'v17'; // sw.js の CACHE の番号と揃える
   const VOLUMES = { mid: 0.5, high: 0.85, max: 1 }; // 休憩終了の音量
   const PARTS = ['胸', '背中', '肩', '腕', '脚', '腹', 'その他'];
   const NO_PART = '未分類';
@@ -63,6 +63,7 @@
   const Cloud = window.GymCloud || {
     init: noop, signIn: noop, signOut: noop, signedIn: false,
     upsertMachine: noop, upsertSet: noop, removeSet: noop, removeMachineAndSets: noop, bulkUpsert: noop,
+    saveToDrive: async () => { throw new Error('unavailable'); },
   };
 
   function save() {
@@ -326,7 +327,9 @@
     }
     const out = [];
     for (const k of [...days.keys()].sort().reverse()) {
-      const dayEl = h('div', { class: 'day' }, h('h3', {}, dayLabel(k)));
+      const dayEl = h('div', { class: 'day' }, h('div', { class: 'day-head' },
+        h('h3', {}, dayLabel(k)),
+        h('button', { class: 'btn small', type: 'button', onclick: (e) => saveDayToDrive(k, e.currentTarget) }, 'ドライブへ')));
       for (const [mid, sets] of days.get(k)) {
         // 同じ重量・回数のセットは1行にまとめ、「3セット」のように回数を示す
         const rows = groupSets(sets).map((g) => h('div', { class: 'row' },
@@ -341,6 +344,47 @@
       out.push(dayEl);
     }
     root.replaceChildren(...out);
+  }
+
+  /* ---------- Googleドライブへの出力(日記用) ---------- */
+  function buildDayJson(key) {
+    const byMachine = new Map();
+    for (const s of state.sets.filter((x) => dayKey(x.ts) === key).sort((a, b) => a.ts - b.ts)) {
+      if (!byMachine.has(s.machineId)) byMachine.set(s.machineId, []);
+      byMachine.get(s.machineId).push(s);
+    }
+    return {
+      date: key,
+      exportedAt: new Date().toISOString(),
+      workouts: [...byMachine].map(([mid, sets]) => {
+        const m = machineById(mid);
+        const cardio = isCardio(m) || isCardioSet(sets[0]);
+        return {
+          machine: m?.name ?? '(削除済み)',
+          type: cardio ? 'cardio' : 'strength',
+          ...(m && m.part && !cardio ? { part: m.part } : {}),
+          summary: groupSets(sets).map(fmtGroup).join(', '),
+          sets: sets.map((s) => (cardio
+            ? { time: timeLabel(s.ts), distanceKm: s.distance, calories: s.calories }
+            : { time: timeLabel(s.ts), weightKg: s.weight, reps: s.reps })),
+        };
+      }),
+    };
+  }
+
+  async function saveDayToDrive(key, btn) {
+    if (!Cloud.signedIn) return toast('管理タブでGoogleにログインしてください');
+    btn.disabled = true;
+    try {
+      const r = await Cloud.saveToDrive(`gymlog-${key}.json`, buildDayJson(key));
+      toast(r.updated ? 'ドライブのファイルを更新しました' : 'ドライブに保存しました(ジムログ フォルダ)');
+    } catch (e) {
+      console.warn(e);
+      const msg = String(e && (e.code || e.message));
+      toast(/popup|cancel/.test(msg) ? 'ドライブへの保存を中止しました' : `ドライブに保存できませんでした: ${msg.slice(0, 60)}`);
+    } finally {
+      btn.disabled = false;
+    }
   }
 
   /* ---------- 管理 ---------- */

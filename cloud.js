@@ -120,6 +120,17 @@
     }
   }
 
+  // ドライブ用のアクセストークン。ボタンを押したときだけ、権限の確認を出して取得する(約1時間有効)
+  let driveTokenCache = null;
+  async function driveToken() {
+    if (driveTokenCache && driveTokenCache.exp > Date.now()) return driveTokenCache.token;
+    const provider = new firebase.auth.GoogleAuthProvider();
+    provider.addScope('https://www.googleapis.com/auth/drive.file');
+    const cred = await user.reauthenticateWithPopup(provider);
+    driveTokenCache = { token: cred.credential.accessToken, exp: Date.now() + 50 * 60 * 1000 };
+    return driveTokenCache.token;
+  }
+
   const guard = (promise) => { if (promise) promise.catch((e) => hooks.onError(e)); };
 
   const api = {
@@ -163,6 +174,40 @@
     },
 
     get signedIn() { return !!user; },
+
+    // 1日分の記録を、Googleドライブの「ジムログ」フォルダに JSON で保存する(同名ファイルは上書き)。
+    // アプリが作ったファイルだけを扱う drive.file 権限を使う。
+    async saveToDrive(fileName, data) {
+      if (!user) throw new Error('signedout');
+      const token = await driveToken();
+      const api = 'https://www.googleapis.com/drive/v3/files';
+      const call = async (url, init = {}) => {
+        const r = await fetch(url, { ...init, headers: { Authorization: `Bearer ${token}`, ...(init.headers || {}) } });
+        if (r.status === 401) driveTokenCache = null;
+        if (!r.ok) throw new Error(`drive ${r.status}: ${(await r.text()).slice(0, 200)}`);
+        return r.json();
+      };
+      const find = async (q) => (await call(`${api}?fields=files(id)&spaces=drive&q=${encodeURIComponent(q)}`)).files[0];
+      let folder = await find("name='ジムログ' and mimeType='application/vnd.google-apps.folder' and trashed=false");
+      if (!folder) {
+        folder = await call(api, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: 'ジムログ', mimeType: 'application/vnd.google-apps.folder' }),
+        });
+      }
+      const existing = await find(`name='${fileName}' and '${folder.id}' in parents and trashed=false`);
+      const boundary = 'gymlog' + Date.now();
+      const meta = existing ? {} : { name: fileName, parents: [folder.id] };
+      const body = `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(meta)}\r\n`
+        + `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(data, null, 2)}\r\n--${boundary}--`;
+      const up = 'https://www.googleapis.com/upload/drive/v3/files';
+      await call(existing ? `${up}/${existing.id}?uploadType=multipart` : `${up}?uploadType=multipart`, {
+        method: existing ? 'PATCH' : 'POST',
+        headers: { 'Content-Type': `multipart/related; boundary=${boundary}` },
+        body,
+      });
+      return { updated: !!existing };
+    },
 
     upsertMachine(m) { if (user) guard(col('machines').doc(m.id).set(machineData(m))); },
     upsertSet(s) { if (user) guard(col('sets').doc(s.id).set(setData(s))); },

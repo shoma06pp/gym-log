@@ -168,7 +168,8 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
 
 /* 履歴 */
 .day { margin-top: 18px; }
-.day h3 { font-size: 15px; margin: 0 0 8px; }
+.day-head { display: flex; align-items: center; justify-content: space-between; margin: 0 0 8px; }
+.day h3 { font-size: 15px; margin: 0; }
 .day .card { margin-bottom: 10px; padding: 10px 14px 4px; }
 .day .mname { font-weight: 700; margin-bottom: 2px; }
 
