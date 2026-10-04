@@ -18,8 +18,7 @@
 
 html, body { margin: 0; color: var(--text); }
 body { background: var(--bg); }
-/* ページの外側の色。iPhone のホーム画面アプリで、描画範囲の下にできる余白をタブバーと同じ色にして目立たなくする */
-html { background: #0b0e11; }
+html { background: var(--bg); }
 
 /* 画面いっぱいの枠にして、中身(main)だけをスクロールさせる。
    フッター(タイマーとタブ)は枠の下に並べるだけなので、アドレスバーの出入りや
@@ -186,7 +185,9 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
   width: 100%; max-width: 560px; margin: 0 auto;
   height: calc(var(--tabs-h) + var(--safe-bottom)); padding-bottom: var(--safe-bottom);
   display: grid; grid-template-columns: repeat(3, 1fr);
-  background: #0b0e11; border-top: 1px solid var(--line);
+  /* ホーム画面アプリでは、アプリの描画範囲の下に、iOS が塗る余白(色は --bg と同じ)ができる。
+     タブバーを同じ色にして、その境目を目立たなくする */
+  background: var(--bg); border-top: 1px solid var(--line);
 }
 .tab { font: inherit; font-size: 15px; color: var(--muted); background: transparent; border: 0; cursor: pointer; }
 .tab.active { color: var(--accent); font-weight: 700; }
