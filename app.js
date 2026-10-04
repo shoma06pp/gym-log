@@ -4,7 +4,7 @@
   const STORE_KEY = 'gymlog.v1';
   const TIMER_KEY = 'gymlog.timerEnd';
   const PRESETS = [60, 90, 120, 180];
-  const APP_VERSION = 'v13'; // sw.js の CACHE の番号と揃える
+  const APP_VERSION = 'v14'; // sw.js の CACHE の番号と揃える
   const VOLUMES = { mid: 0.5, high: 0.85, max: 1 }; // 休憩終了の音量
   const PARTS = ['胸', '背中', '肩', '腕', '脚', '腹', 'その他'];
   const NO_PART = '未分類';
