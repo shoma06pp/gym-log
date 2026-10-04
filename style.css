@@ -97,6 +97,16 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
   border: 1px solid var(--line); border-radius: 12px; padding: 0 14px; min-height: 44px;
 }
 
+.row-form { flex-wrap: wrap; }
+.row-form .part-select { flex: 0 0 100%; }
+.part-select {
+  font: inherit; font-size: 15px; color: var(--text); background: var(--bg); border: 1px solid var(--line);
+  border-radius: 10px; min-height: 44px; padding: 0 8px;
+}
+.row .part-select { min-height: 40px; font-size: 14px; max-width: 7.5em; }
+.group-head { font-size: 13px; color: var(--muted); padding: 12px 0 2px; border-bottom: 1px solid var(--line); }
+.group-head:first-child { padding-top: 8px; }
+
 .settings { display: grid; gap: 12px; }
 .switch-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 44px; }
 .switch-row input[type="checkbox"] { width: 24px; height: 24px; accent-color: var(--accent); }

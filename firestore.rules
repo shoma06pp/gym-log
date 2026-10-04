@@ -11,11 +11,13 @@ service cloud.firestore {
     match /users/{uid}/gymlog_machines/{id} {
       allow read, delete: if isOwner(uid);
       allow create, update: if isOwner(uid)
-        && request.resource.data.keys().hasOnly(['name', 'createdAt'])
+        && request.resource.data.keys().hasOnly(['name', 'createdAt', 'part'])
         && request.resource.data.name is string
         && request.resource.data.name.size() > 0
         && request.resource.data.name.size() <= 40
-        && request.resource.data.createdAt is number;
+        && request.resource.data.createdAt is number
+        && (!('part' in request.resource.data)
+            || (request.resource.data.part is string && request.resource.data.part.size() <= 10));
     }
 
     match /users/{uid}/gymlog_sets/{id} {

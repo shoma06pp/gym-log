@@ -32,7 +32,8 @@
   }
 
   const col = (name) => db.collection('users').doc(user.uid).collection(`gymlog_${name}`);
-  const machineData = (m) => ({ name: m.name, createdAt: m.createdAt });
+  // 部位は未設定のとき保存しない(古いルールのままでも、既存の書き込みが通るように)
+  const machineData = (m) => (m.part ? { name: m.name, createdAt: m.createdAt, part: m.part } : { name: m.name, createdAt: m.createdAt });
   const setData = (s) => ({ machineId: s.machineId, weight: s.weight, reps: s.reps, ts: s.ts });
 
   async function commit(ops) {
@@ -75,7 +76,7 @@
       hooks.onRemote(name, snap.docs.map((d) => ({ id: d.id, ...toItem(d.data()) })));
     }, (err) => hooks.onError(err));
     unsubs = [
-      watch('machines', (d) => ({ name: String(d.name ?? ''), createdAt: Number(d.createdAt) || 0 })),
+      watch('machines', (d) => ({ name: String(d.name ?? ''), createdAt: Number(d.createdAt) || 0, part: typeof d.part === 'string' ? d.part : '' })),
       watch('sets', (d) => ({ machineId: String(d.machineId ?? ''), weight: Number(d.weight), reps: Number(d.reps), ts: Number(d.ts) })),
     ];
   }

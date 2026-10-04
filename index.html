@@ -25,6 +25,11 @@
       </div>
 
       <div id="record-body">
+        <div id="part-wrap">
+          <h2>部位</h2>
+          <div id="part-chips" class="chips" role="radiogroup" aria-label="部位を選択"></div>
+        </div>
+
         <h2>マシン</h2>
         <div id="machine-chips" class="chips" role="radiogroup" aria-label="マシンを選択"></div>
 
@@ -67,6 +72,7 @@
 
       <h2>マシンの登録</h2>
       <form id="machine-form" class="card row-form">
+        <select id="machine-part" class="part-select" aria-label="部位"></select>
         <input id="machine-name" type="text" maxlength="40" placeholder="例: レッグプレス" autocomplete="off" aria-label="マシン名">
         <button class="btn primary" type="submit">追加</button>
       </form>

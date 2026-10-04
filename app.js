@@ -4,6 +4,8 @@
   const STORE_KEY = 'gymlog.v1';
   const TIMER_KEY = 'gymlog.timerEnd';
   const PRESETS = [60, 90, 120, 180];
+  const PARTS = ['胸', '背中', '肩', '腕', '脚', '腹', 'その他'];
+  const NO_PART = '未分類';
 
   const $ = (sel, root = document) => root.querySelector(sel);
   const pad = (n) => String(n).padStart(2, '0');
@@ -28,6 +30,7 @@
     machines: [],
     sets: [],
     lastMachine: null,
+    lastPart: 'all', // 記録画面で選んでいる部位 ('all' = すべて)
     owner: null, // クラウドと同期した Firebase ユーザーID
     settings: { interval: 90, autoStart: true, step: 2.5 },
   });
@@ -63,6 +66,11 @@
   }
 
   const machineById = (id) => state.machines.find((m) => m.id === id);
+  const partOf = (m) => (PARTS.includes(m.part) ? m.part : NO_PART);
+  const partsPresent = () => {
+    const present = new Set(state.machines.map(partOf));
+    return [...PARTS, NO_PART].filter((p) => present.has(p));
+  };
   const fmtW = (n) => (n === 0 ? '自重' : Number.isInteger(n) ? `${n}kg` : `${+n.toFixed(2)}kg`);
   const fmtSet = (s) => `${fmtW(s.weight)} × ${s.reps}`;
 
@@ -116,15 +124,17 @@
     return { key, sets: prev.filter((s) => dayKey(s.ts) === key).sort((a, b) => a.ts - b.ts) };
   }
 
-  function selectMachine(id, { prefill = true } = {}) {
+  function prefillInputs(id) {
+    const last = latestSet(id);
+    $('#weight').value = last ? last.weight : 20;
+    $('#reps').value = last ? last.reps : 10;
+  }
+
+  function selectMachine(id) {
     selId = id;
     state.lastMachine = id;
     save();
-    if (prefill) {
-      const last = latestSet(id);
-      $('#weight').value = last ? last.weight : 20;
-      $('#reps').value = last ? last.reps : 10;
-    }
+    prefillInputs(id);
     renderRecord();
   }
 
@@ -134,16 +144,28 @@
     $('#record-body').hidden = !has;
     if (!has) return;
 
-    if (!machineById(selId)) {
-      const want = machineById(state.lastMachine) ? state.lastMachine : state.machines[0].id;
-      selId = want;
-      const last = latestSet(want);
-      $('#weight').value = last ? last.weight : 20;
-      $('#reps').value = last ? last.reps : 10;
+    // 部位で絞り込む。選んだ部位にマシンがなければ「すべて」に戻す
+    const parts = partsPresent();
+    let partSel = state.lastPart;
+    if (partSel !== 'all' && !parts.includes(partSel)) partSel = 'all';
+    const visible = partSel === 'all' ? state.machines : state.machines.filter((m) => partOf(m) === partSel);
+
+    if (!visible.some((m) => m.id === selId)) {
+      const next = visible.find((m) => m.id === state.lastMachine) || visible[0];
+      selId = next.id;
+      prefillInputs(next.id);
     }
 
+    $('#part-wrap').hidden = parts.length < 2;
+    $('#part-chips').replaceChildren(...['all', ...parts].map((p) =>
+      h('button', {
+        class: 'chip', type: 'button', role: 'radio',
+        'aria-checked': String(p === partSel),
+        onclick: () => { state.lastPart = p; save(); renderRecord(); },
+      }, p === 'all' ? 'すべて' : p)));
+
     const chips = $('#machine-chips');
-    chips.replaceChildren(...state.machines.map((m) =>
+    chips.replaceChildren(...visible.map((m) =>
       h('button', {
         class: 'chip', type: 'button', role: 'radio',
         'aria-checked': String(m.id === selId),
@@ -242,15 +264,45 @@
     if (!state.machines.length) {
       list.replaceChildren(h('div', { class: 'none' }, 'マシンを追加してください'));
     } else {
-      list.replaceChildren(...state.machines.map((m) => h('div', { class: 'row' },
-        h('span', { class: 'grow' }, m.name),
-        h('button', { class: 'icon-btn', type: 'button', 'aria-label': `${m.name}の名前を変更`, onclick: () => renameMachine(m.id) }, '✎'),
-        h('button', { class: 'icon-btn', type: 'button', 'aria-label': `${m.name}を削除`, onclick: () => deleteMachine(m.id) }, '✕'))));
+      const rows = [];
+      for (const part of [...PARTS, NO_PART]) {
+        const ms = state.machines.filter((m) => partOf(m) === part);
+        if (!ms.length) continue;
+        rows.push(h('div', { class: 'group-head' }, `${part}(${ms.length})`));
+        for (const m of ms) {
+          rows.push(h('div', { class: 'row' },
+            h('span', { class: 'grow' }, m.name),
+            h('select', {
+              class: 'part-select', 'aria-label': `${m.name}の部位`,
+              onchange: (e) => changePart(m.id, e.target.value),
+            }, partOptions(partOf(m) === NO_PART ? '' : m.part)),
+            h('button', { class: 'icon-btn', type: 'button', 'aria-label': `${m.name}の名前を変更`, onclick: () => renameMachine(m.id) }, '✎'),
+            h('button', { class: 'icon-btn', type: 'button', 'aria-label': `${m.name}を削除`, onclick: () => deleteMachine(m.id) }, '✕')));
+        }
+      }
+      list.replaceChildren(...rows);
     }
     $('#opt-auto').checked = !!state.settings.autoStart;
     $('#opt-step').value = String(state.settings.step);
     renderCloud();
   }
+
+  const partOptions = (selected) => [
+    h('option', { value: '', selected: !selected }, NO_PART),
+    ...PARTS.map((p) => h('option', { value: p, selected: p === selected }, p)),
+  ];
+
+  function changePart(id, part) {
+    const m = machineById(id);
+    if (!m) return;
+    m.part = part;
+    save();
+    Cloud.upsertMachine(m);
+    renderAdmin();
+  }
+
+  // 登録フォームの部位は、続けて登録しやすいよう前回の選択を覚えておく
+  $('#machine-part').replaceChildren(...partOptions(''));
 
   $('#machine-form').addEventListener('submit', (e) => {
     e.preventDefault();
@@ -258,7 +310,7 @@
     const name = input.value.trim();
     if (!name) return;
     if (state.machines.some((m) => m.name === name)) return toast('同じ名前のマシンがあります');
-    const machine = { id: uid(), name, createdAt: Date.now() };
+    const machine = { id: uid(), name, createdAt: Date.now(), part: $('#machine-part').value };
     state.machines.push(machine);
     save();
     Cloud.upsertMachine(machine);
@@ -351,7 +403,9 @@
         ? `マシン ${machines.length} 件、記録 ${sets.length} セットを追加します。\n同じIDの記録は上書きされます。よろしいですか?`
         : `マシン ${machines.length} 件、記録 ${sets.length} セットを読み込みます。\n今のデータは置き換えられます。よろしいですか?`;
       if (!confirm(msg)) return;
-      const nm = machines.map((m, i) => ({ id: m.id, name: m.name, createdAt: Number.isFinite(m.createdAt) ? m.createdAt : i }));
+      const nm = machines.map((m, i) => ({
+        id: m.id, name: m.name, createdAt: Number.isFinite(m.createdAt) ? m.createdAt : i, part: PARTS.includes(m.part) ? m.part : '',
+      }));
       const ns = sets.map((s) => ({ id: typeof s.id === 'string' ? s.id : uid(), machineId: s.machineId, weight: s.weight, reps: s.reps, ts: s.ts }));
       if (merge) {
         const byId = (list, add) => [...new Map([...list, ...add].map((x) => [x.id, x])).values()];
