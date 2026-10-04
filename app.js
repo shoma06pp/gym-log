@@ -4,7 +4,7 @@
   const STORE_KEY = 'gymlog.v1';
   const TIMER_KEY = 'gymlog.timerEnd';
   const PRESETS = [60, 90, 120, 180];
-  const APP_VERSION = 'v8'; // sw.js の CACHE の番号と揃える
+  const APP_VERSION = 'v9'; // sw.js の CACHE の番号と揃える
   const PARTS = ['胸', '背中', '肩', '腕', '脚', '腹', 'その他'];
   const NO_PART = '未分類';
 
@@ -289,6 +289,23 @@
     renderDiag();
   }
 
+  // iPhone のホーム画面アプリでは、window の高さが実画面より上端の安全領域の分(約59pt)低く報告され、
+  // フッターの下に余白ができる。実験として、枠の高さを実画面の高さに合わせる。保存はしない(開き直すと元に戻る)。
+  let frameFix = false;
+  function fitFrame() {
+    const standalone = navigator.standalone === true || matchMedia('(display-mode: standalone)').matches;
+    const screenH = Math.max(screen.width, screen.height);
+    const gap = standalone && innerHeight > innerWidth ? screenH - innerHeight : 0;
+    document.body.style.height = frameFix && gap > 0 && gap <= 100 ? `${screenH}px` : '';
+  }
+  $('#frame-fix').addEventListener('click', () => {
+    frameFix = !frameFix;
+    fitFrame();
+    $('#frame-fix').textContent = frameFix ? '枠の補正を戻す' : '枠の補正を試す(実験・この画面を閉じると元に戻ります)';
+    renderDiag();
+  });
+  ['resize', 'orientationchange', 'pageshow'].forEach((ev) => window.addEventListener(ev, fitFrame));
+
   // 表示のずれを調べるための情報。画面のスクリーンショットを送ってもらう用
   function renderDiag() {
     const probe = h('div', { style: 'position:fixed;visibility:hidden;left:0;top:0;padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom) 0' });
@@ -306,6 +323,7 @@
       `visualViewport: ${vv ? `${px(vv.width)} x ${px(vv.height)} (上${px(vv.offsetTop)})` : '-'}`,
       `screen: ${screen.width} x ${screen.height}`,
       `安全領域: ${inset}`,
+      `枠の補正: ${frameFix ? `ON (body高さ ${document.body.style.height || '変更なし'})` : 'OFF'}`,
       `body: ${rect('body')}`,
       `main: ${rect('main')}`,
       `タイマー: ${rect('#timer')}`,
