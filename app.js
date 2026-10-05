@@ -4,7 +4,7 @@
   const STORE_KEY = 'gymlog.v1';
   const TIMER_KEY = 'gymlog.timerEnd';
   const PRESETS = [60, 90, 120, 180];
-  const APP_VERSION = 'v18'; // sw.js の CACHE の番号と揃える
+  const APP_VERSION = 'v19'; // sw.js の CACHE の番号と揃える
   const VOLUMES = { mid: 0.5, high: 0.85, max: 1 }; // 休憩終了の音量
   const PARTS = ['胸', '背中', '肩', '腕', '脚', '腹', 'その他'];
   const NO_PART = '未分類';
@@ -336,6 +336,7 @@
           h('span', { class: 'grow val' }, fmtSet(g.first)),
           g.count > 1 || !isCardioSet(g.first) ? h('span', { class: 'pill' }, `${g.count}セット`) : null,
           h('span', { class: 'time' }, timeLabel(g.last.ts)),
+          h('button', { class: 'icon-btn', type: 'button', 'aria-label': 'この記録を編集', onclick: () => editGroup(g) }, '✎'),
           h('button', { class: 'icon-btn', type: 'button', 'aria-label': 'この記録を削除', onclick: () => deleteSet(g.last.id, g.count) }, '✕')));
         dayEl.append(h('div', { class: 'card' },
           h('div', { class: 'mname' }, machineById(mid)?.name ?? '(削除済みのマシン)'),
@@ -345,6 +346,40 @@
     }
     root.replaceChildren(...out);
   }
+
+  /* ---------- 記録の編集(同じ内容のまとまり全体の重量・回数などを直す) ---------- */
+  let editing = null;
+  function editGroup(g) {
+    const cardio = isCardioSet(g.first);
+    editing = { g, cardio };
+    $('#edit-title').textContent = `${machineById(g.first.machineId)?.name ?? '(削除済みのマシン)'}の記録を編集`;
+    $('#edit-note').textContent = g.count > 1 ? `この${g.count}セットすべてに反映されます` : '';
+    $('#edit-l1').textContent = cardio ? '距離 (km)' : '重量 (kg)';
+    $('#edit-l2').textContent = cardio ? 'カロリー (kcal)' : '回数';
+    $('#edit-v1').value = cardio ? g.first.distance : g.first.weight;
+    $('#edit-v2').value = cardio ? g.first.calories : g.first.reps;
+    $('#edit-dialog').showModal();
+  }
+  $('#edit-cancel').addEventListener('click', () => $('#edit-dialog').close());
+  $('#edit-form').addEventListener('submit', (e) => {
+    e.preventDefault();
+    if (!editing) return;
+    const { g, cardio } = editing;
+    const v1 = Math.round(parseFloat($('#edit-v1').value) * 100) / 100;
+    const v2 = cardio ? Math.round(parseFloat($('#edit-v2').value)) : parseInt($('#edit-v2').value, 10);
+    const ok = cardio ? (v1 >= 0 && v2 >= 0 && !(v1 === 0 && v2 === 0)) : (v1 >= 0 && v2 > 0);
+    if (!ok) return toast(cardio ? '距離かカロリーを入力してください' : '重量と回数を入力してください');
+    for (const s of g.sets) {
+      if (cardio) { s.distance = v1; s.calories = v2; } else { s.weight = v1; s.reps = v2; }
+      Cloud.upsertSet(s);
+    }
+    save();
+    $('#edit-dialog').close();
+    editing = null;
+    renderRecord();
+    renderHistory();
+    toast(`書き換えました: ${fmtSet(g.sets[0])}${g.count > 1 ? ` (${g.count}セット)` : ''}`);
+  });
 
   /* ---------- Googleドライブへの出力(日記用) ---------- */
   function buildDayJson(key) {

@@ -194,6 +194,20 @@
     <button class="tab" data-tab="admin" type="button">管理</button>
   </nav>
 
+  <!-- 記録の編集 -->
+  <dialog id="edit-dialog" class="edit-dialog">
+    <form method="dialog" id="edit-form">
+      <h3 id="edit-title"></h3>
+      <p id="edit-note" class="muted"></p>
+      <div class="field" id="edit-f1"><label for="edit-v1" id="edit-l1"></label><input id="edit-v1" type="number" inputmode="decimal" min="0" step="any"></div>
+      <div class="field" id="edit-f2"><label for="edit-v2" id="edit-l2"></label><input id="edit-v2" type="number" inputmode="decimal" min="0" step="any"></div>
+      <div class="btn-row">
+        <button id="edit-cancel" type="button" class="btn">キャンセル</button>
+        <button id="edit-save" type="submit" class="btn primary">保存</button>
+      </div>
+    </form>
+  </dialog>
+
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
   <script src="firebase-config.js"></script>
   <script src="cloud.js"></script>
