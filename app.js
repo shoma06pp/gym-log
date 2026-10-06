@@ -4,7 +4,7 @@
   const STORE_KEY = 'gymlog.v1';
   const TIMER_KEY = 'gymlog.timerEnd';
   const PRESETS = [60, 90, 120, 180];
-  const APP_VERSION = 'v20'; // sw.js の CACHE の番号と揃える
+  const APP_VERSION = 'v21'; // sw.js の CACHE の番号と揃える
   const VOLUMES = { mid: 0.5, high: 0.85, max: 1 }; // 休憩終了の音量
   const PARTS = ['胸', '背中', '肩', '腕', '脚', '腹', 'その他'];
   const NO_PART = '未分類';
@@ -729,8 +729,8 @@
   // iPhone では、別アプリの音声・電話・画面ロックなどで 'suspended' や 'interrupted' になり、
   // 画面をタップするまで鳴らなくなる。そのため、タップのたびに状態を確かめて復帰させる。
   function ensureAudio() {
-    // iPhone のマナースイッチに関係なく、再生用として鳴らす(iOS 16.4 以降)
-    try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch (e) { /* 非対応は無視 */ }
+    // 通知音のような短い音として扱う(iOS 16.4 以降)。'playback' だと裏の YouTube などを止めてしまう
+    try { if (navigator.audioSession) navigator.audioSession.type = 'transient'; } catch (e) { /* 非対応は無視 */ }
     try {
       const AC = window.AudioContext || window.webkitAudioContext;
       if (!AC) return;
