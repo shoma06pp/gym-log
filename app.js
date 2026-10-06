@@ -4,7 +4,7 @@
   const STORE_KEY = 'gymlog.v1';
   const TIMER_KEY = 'gymlog.timerEnd';
   const PRESETS = [60, 90, 120, 180];
-  const APP_VERSION = 'v19'; // sw.js の CACHE の番号と揃える
+  const APP_VERSION = 'v20'; // sw.js の CACHE の番号と揃える
   const VOLUMES = { mid: 0.5, high: 0.85, max: 1 }; // 休憩終了の音量
   const PARTS = ['胸', '背中', '肩', '腕', '脚', '腹', 'その他'];
   const NO_PART = '未分類';
@@ -729,6 +729,8 @@
   // iPhone では、別アプリの音声・電話・画面ロックなどで 'suspended' や 'interrupted' になり、
   // 画面をタップするまで鳴らなくなる。そのため、タップのたびに状態を確かめて復帰させる。
   function ensureAudio() {
+    // iPhone のマナースイッチに関係なく、再生用として鳴らす(iOS 16.4 以降)
+    try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch (e) { /* 非対応は無視 */ }
     try {
       const AC = window.AudioContext || window.webkitAudioContext;
       if (!AC) return;
@@ -886,6 +888,21 @@
 
   // 休憩終了の音。選んだ音(内蔵 or 自分の音声ファイル)を鳴らす。
   // コンプレッサーで音割れを抑えつつ音量を稼ぐ
+  // Bluetooth イヤホンは無音が続くと省電力になり、短い音の頭が欠ける。
+  // 終了の少し前に、聞こえないほど小さい音を出して接続を起こしておく
+  function wakeAudioOutput() {
+    ensureAudio();
+    const ctx = T.ctx;
+    if (!ctx || ctx.state !== 'running') return;
+    const g = ctx.createGain();
+    g.gain.value = 0.0005;
+    const o = ctx.createOscillator();
+    o.frequency.value = 440;
+    o.connect(g).connect(ctx.destination);
+    o.start();
+    o.stop(ctx.currentTime + 1.2);
+  }
+
   function beep() {
     if (navigator.vibrate) navigator.vibrate([250, 120, 250, 120, 500]);
     ensureAudio();
@@ -902,10 +919,10 @@
       src.buffer = customBuffer;
       master.gain.value = vol * 2; // 録音された音は小さめのことが多いので持ち上げる
       src.connect(master);
-      src.start();
+      src.start(ctx.currentTime + 0.35);
       return;
     }
-    (SOUNDS[state.settings.sound] || SOUNDS.beep).play(ctx, master, ctx.currentTime + 0.05);
+    (SOUNDS[state.settings.sound] || SOUNDS.beep).play(ctx, master, ctx.currentTime + 0.35); // 頭が欠けないよう少し遅らせる
   }
 
   async function requestWake() {
@@ -951,6 +968,10 @@
     let left = 0;
     if (T.endAt) {
       left = Math.ceil((T.endAt - Date.now()) / 1000);
+      if (left <= 2 && left > 0 && T.pingedFor !== T.endAt) {
+        T.pingedFor = T.endAt;
+        wakeAudioOutput();
+      }
       if (left <= 0) {
         T.endAt = 0;
         T.doneAt = Date.now();
