@@ -20,7 +20,9 @@
 1. GitHub のリポジトリで **Settings → Pages** を開く
 2. **Source** を `Deploy from a branch` にする
 3. **Branch** を `main`、フォルダを `/ (root)` にして **Save**
-4. 数分後、`https://<ユーザー名>.github.io/gym-log/` で公開される
+4. 数分後、`https://porygon-works.github.io/gym-log/` で公開される
+
+GitHub のユーザー名(またはリポジトリ名)を変えると公開URLも変わります。その場合は、Firebase コンソールの **Authentication → Settings → 承認済みドメイン** に新しいドメイン(例: `porygon-works.github.io`)を追加しないと、Google ログインができません。ホーム画面のアイコンも、新しいURLから追加し直してください。
 
 ## スマホのホーム画面に追加する
 
